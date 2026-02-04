@@ -1,0 +1,12 @@
+html, body {
+height: 100%;
+width: 100%;
+background-color: red;
+margin: 0;
+}
+
+
+#mapa {
+    height: 100%;
+    width: 100%;
+}
