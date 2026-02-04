@@ -40,3 +40,4 @@ const lugares = [
         "coordenadas": [14.6029, -90.5108]
     }
 ];
+

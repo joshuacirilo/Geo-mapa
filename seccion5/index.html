@@ -17,7 +17,12 @@
 
     <div class="d-flex h-100"> 
         <div class="row m-0 w-100">
-            <div id="sidebar" class="col-3 h-100">
+
+            <div id="sidebar" class="d-flex flex-column justify-content-between col-3 h-100 p-2">
+
+                <div id="mesaje" class=" w-100 alert alert-primary fw-bold hidden" role="alert">
+                    Hola mundo
+                  </div>
 
             </div>
 
@@ -33,7 +38,8 @@
 
 
      <!-- Make sure you put this AFTER Leaflet's CSS -->
- <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+<script src="./config/lugares.js"></script>
+     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
  crossorigin=""></script>
  <script src="./index.js"></script>
