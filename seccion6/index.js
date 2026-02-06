@@ -9,7 +9,7 @@ const map = L.map('mapa', {
     keyboard: true,
     minZoom: 4,
     maxZoom: 21,
-   
+
 });
 //capa general 
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -23,10 +23,10 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 //capas en negro
 const Stadia_AlidadeSmoothDark = L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.{ext}', {
-	minZoom: 0,
-	maxZoom: 20,
-	attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-	ext: 'png'
+    minZoom: 0,
+    maxZoom: 20,
+    attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    ext: 'png'
 }).addTo(map);
 
 /*
@@ -63,10 +63,10 @@ const marcador2 = L.marker([15.607820, -90.513863],
 //nuevo elemento
 marcador.on('dragend', () => {
 
-const nuevasCoordenadas = marcador.getLatLng();
+    const nuevasCoordenadas = marcador.getLatLng();
     console.log('las nuevas coordenadas son: ', nuevasCoordenadas);
 
-//actualizar el marcador en el mapa
+    //actualizar el marcador en el mapa
     setTimeout(() => {
 
         //fijar la opacidad, logitud y latitud del marcador
@@ -86,8 +86,9 @@ const myIcon = L.icon({
     iconAnchor: [14, 28],
 });
 
-const marcador3 =  L.marker([16.607820, -90.513863],
-    {   icon: myIcon,
+const marcador3 = L.marker([16.607820, -90.513863],
+    {
+        icon: myIcon,
         draggable: true,
         opacity: 0.5,
     }
@@ -98,96 +99,96 @@ const marcador3 =  L.marker([16.607820, -90.513863],
 marcador3.on('dragend', () => {
 
     const nuevasCoordenadas = marcador.getLatLng();
-        console.log('las nuevas coordenadas son: ', nuevasCoordenadas);
-    
+    console.log('las nuevas coordenadas son: ', nuevasCoordenadas);
+
     //actualizar el marcador en el mapa
-        setTimeout(() => {
-    
-            //fijar la opacidad, logitud y latitud del marcador
-            marcador3.setOpacity(1);
-            marcador3.setLatLng([16.607820, -90.513863]);
-        }, 3000);
-    
-    });
+    setTimeout(() => {
+
+        //fijar la opacidad, logitud y latitud del marcador
+        marcador3.setOpacity(1);
+        marcador3.setLatLng([16.607820, -90.513863]);
+    }, 3000);
+
+});
 
 
-    //path linea del objeto que queremos dibujar
+//path linea del objeto que queremos dibujar
 
-    //diseño 1
-    const path = {
+//diseño 1
+const path = {
 
-        stroke: true,
-        color: 'red',
-        weight: 2,
-        opacity: 1,
-        fillColor: 'blue',
-        fillOpacity: 0.5,
+    stroke: true,
+    color: 'red',
+    weight: 2,
+    opacity: 1,
+    fillColor: 'blue',
+    fillOpacity: 0.5,
 
-    }
-    //diseño 2
-    const path2 = {
-        stroke: false,
-        fillColor: 'black',
-        fillOpacity: 1,
-    }
+}
+//diseño 2
+const path2 = {
+    stroke: false,
+    fillColor: 'black',
+    fillOpacity: 1,
+}
 
-        //diseño 3
-        const path3 = {
-            stroke: true,
-            color: 'orange',
-            weight: 5,
-            opacity: 1,
-            fillOpacity: 0.5,
-        }
+//diseño 3
+const path3 = {
+    stroke: true,
+    color: 'orange',
+    weight: 5,
+    opacity: 1,
+    fillOpacity: 0.5,
+}
 
 
-        //diseño 4
-        const path4 = {
-            stroke: true,
-            color: 'red',
-            weight: 5,
-            opacity: 1,
-            fillOpacity: 0,
-            dashArray: [5, 10],
-        }
+//diseño 4
+const path4 = {
+    stroke: true,
+    color: 'red',
+    weight: 5,
+    opacity: 1,
+    fillOpacity: 0,
+    dashArray: [5, 10],
+}
 
-        //diseño 5
-        const path5 = {
-            stroke: true,
-            color: 'brown',
-            weight: 5,
-            opacity: 1,
-            fillOpacity: 1,
-            fillColor: 'green',
-            dashArray: [10, 20],
-        }
-    
+//diseño 5
+const path5 = {
+    stroke: true,
+    color: 'brown',
+    weight: 5,
+    opacity: 1,
+    fillOpacity: 1,
+    fillColor: 'green',
+    dashArray: [10, 20],
+}
 
-    //circulo y como dibujarlo
 
-    const circulo = L.circle([14.589226, -90.512165], {radius: 30000, ...path});
-    const circulo2 = L.circle([14.2, -90.0], {radius: 30000, ...path});
+//circulo y como dibujarlo
+
+const circulo = L.circle([14.589226, -90.512165], { radius: 30000, ...path });
+const circulo2 = L.circle([14.2, -90.0], { radius: 30000, ...path });
 
 //obtener extension del circulo (debe estar en el mapa primero)
-    //const extension = circulo.getBounds();
+//const extension = circulo.getBounds();
 
 
 //ajustar el zoom del mapa a la extension del circulo
-    //map.fitBounds(extension);
+//map.fitBounds(extension);
 
 //disminuir el radio del circulo, devolver las coordenadas del circulo, cambiar el estilo del circulo
-    setTimeout(() => {
+setTimeout(() => {
 
 
-        circulo.setRadius(500);
-        const latlng = circulo.getLatLng();
-        console.log('las coordenadas son: ', latlng);
-        //cambiar estilo del circulo
-        circulo.setStyle(path2);
-        //traer al frente el circulo
-        circulo.bringToFront();
+    circulo.setRadius(500);
+    const latlng = circulo.getLatLng();
+    console.log('las coordenadas son: ', latlng);
+    //cambiar estilo del circulo
+    circulo.setStyle(path2);
+    //traer al frente el circulo
+    circulo.bringToFront();
 
-    },3000);
+}, 3000);
 
 
 circulo2.on('mouseover', () => {
@@ -231,11 +232,11 @@ circleMarker.on('mouseout', () => {
 
 //polylinea 
 const linea = L.polyline([[14.776897, -90.362852],
-    [14.863040, -90.329978],
-    [14.778570, -90.008153]],{
-        smoothFactor:1
-    ,...path4
-    }).addTo(map);
+[14.863040, -90.329978],
+[14.778570, -90.008153]], {
+    smoothFactor: 1
+    , ...path4
+}).addTo(map);
 
 //limites
 /*
@@ -256,7 +257,7 @@ setTimeout(() => {
 */
 //rectangulo
 const extensionRectangulo = [
-    [15.917538, -90.076471], 
+    [15.917538, -90.076471],
     [15.352612, -89.512931]
 ];
 
@@ -283,15 +284,15 @@ setTimeout(() => {
 const poligono = L.polygon([
     [14.589226, -90.512165],
     [14.352612, -89.512931],
-    [14.778570, -90.008153]],{
-        color: "red"
+    [14.778570, -90.008153]], {
+    color: "red"
 
-    });
+});
 
-    //map.fitBounds(poligono.getBounds());
+//map.fitBounds(poligono.getBounds());
 
 
-    //poligono.bringToBack();
+//poligono.bringToBack();
 
 
 //const geoJSON = poligono.toGeoJSON();
@@ -511,7 +512,7 @@ featureGroup.on('click', (evento) => {
 
 featureGroup.addLayer(marcador);
 featureGroup.addLayer(marcador2);
-featureGroup.addLayer(marcador3); 
+featureGroup.addLayer(marcador3);
 featureGroup.addLayer(circulo);
 featureGroup.addLayer(circulo2);
 featureGroup.addLayer(rectangulo);
@@ -592,30 +593,73 @@ setTimeout(() => {
 //amarrar a un layer
 
 
-    marcador.bindTooltip(
-        'esto es una tootip',{
-            
-            opacity: 1,
-            permanente: true,
-            sticky: true,
-        }
-    ).openTooltip();
+marcador.bindTooltip(
+    'esto es una tootip', {
 
-    const tooltip = L.tooltip();
-    tooltip.setLatLng([14.607820, -90.513863]);
-    tooltip.setContent('esto es una tootip');
-    tooltip.openOn(map);
+    opacity: 1,
+    permanente: true,
+    sticky: true,
+}
+).openTooltip();
 
-
-
-    //----TileLayer. wms
-    const nexrad = L.tileLayer.wms("http://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi", {
-        layers: 'nexrad-n0r-900913',
-        format: 'image/png',
-        transparent: true,
-        attribution: "Weather data © 2012 IEM Nexrad"
-    });
+const tooltip = L.tooltip();
+tooltip.setLatLng([14.607820, -90.513863]);
+tooltip.setContent('esto es una tootip');
+tooltip.openOn(map);
 
 
+
+//----TileLayer. wms, capas para ver humeda sobre la informacion que hay en el link 
+const nexrad = L.tileLayer.wms("http://mesonet.agron.iastate.edu/cgi-bin/wms/nexrad/n0r.cgi", {
+    layers: 'nexrad-n0r-900913',
+    format: 'image/png',
+    transparent: true,
+    attribution: "Weather data © 2012 IEM Nexrad"
+}).addTo(map);
+
+
+
+//-----imageoverlay, agregar imagen sobre el mapa
+const url = "./assets/arbol.jpg";
+const extesion = [
+    [14.589226, -90.512165],
+    [14.352612, -89.512931]];
+
+const imageOverlay = L.imageOverlay(url, extesion, {
+
+    opacity: 0.5,
+    interactive: true,
+
+
+}).addTo(map);
+
+
+imageOverlay.on('click', (evento) => {
+    console.log(evento);
+});
+
+//const videoOverlay
+
+const videoUrl = "./assets/video.mp4";
+const videoExtesion = [
+    [14.589226, -90.512165],
+    [14.352612, -89.512931]];
+
+const videoOverlay = L.videoOverlay(videoUrl, videoExtesion, {
+
+    opacity: 0.5,
+    interactive: true,
+
+}).addTo(map);
+
+
+setTimeout(() => {
+    const elemento = videoOverlay.getElement();
+    console.log(elemento);
+
+    elemento.play();
+
+    elemento.pause();
+}, 3000);
 
 
