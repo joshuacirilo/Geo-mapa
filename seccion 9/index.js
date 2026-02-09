@@ -110,6 +110,7 @@ const evaluar = () => {
     }
 };
 
+//limpiar el mapa
 limpiar.addEventListener('click', () => {
     if (polygon) {
         map.removeLayer(polygon);
