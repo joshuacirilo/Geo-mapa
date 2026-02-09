@@ -2,16 +2,40 @@ const btn = document.querySelector('button');
 const select = document.querySelector('select');
 const checkbox = document.querySelector('#checkbox');
 const limpiar = document.querySelector('#limpiar');
+const sidebar = document.querySelector('#sidebar');
 
 
 btn.addEventListener('click', () => {
     const { value } = select;
 
+    if (value === "polygon") {
+        if (!polygon || latlngs.length < 3) {
+            sidebar.textContent = "Poligono incompleto: agrega al menos 3 puntos.";
+            return;
+        }
 
-    if (value) {
-        console.log(value);
+        const geojson = polygon.toGeoJSON();
+        sidebar.innerHTML = `<pre>${JSON.stringify(geojson, null, 2)}</pre>`;
+        return;
     }
 
+    if (value === "circle") {
+        if (!circle || circleCenter) {
+            sidebar.textContent = "Circulo incompleto: define centro y radio con 2 clicks.";
+            return;
+        }
+
+        const geojson = circle.toGeoJSON();
+        geojson.properties = {
+            ...geojson.properties,
+            radius: circle.getRadius(),
+        };
+
+        sidebar.innerHTML = `<pre>${JSON.stringify(geojson, null, 2)}</pre>`;
+        return;
+    }
+
+    sidebar.textContent = "Selecciona una figura para crear.";
 });
 
 
