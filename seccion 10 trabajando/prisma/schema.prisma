@@ -14,3 +14,11 @@ datasource db {
 //   name      String
 //   createdAt DateTime @default(now())
 // }
+
+model Marker {
+  id        Int    @id @default(autoincrement())
+  id_public String @unique
+  title     String
+  categoria String
+  geojson   Json
+}
