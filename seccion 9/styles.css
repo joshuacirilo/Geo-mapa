@@ -44,3 +44,33 @@ button {
 
     margin-top: 0.25rem;
 }
+
+.icono-base {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: #111;
+    border: 2px solid #fff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    font-size: 14px;
+    line-height: 1;
+}
+
+.icono-casas {
+    color: #00c2ff;
+}
+
+.icono-departamentos {
+    color: #ffb703;
+}
+
+.icono-hospitales {
+    color: #e63946;
+}
+
+.icono-centrocomerciales {
+    color: #2a9d8f;
+}

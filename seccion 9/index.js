@@ -19,8 +19,10 @@ btn.addEventListener('click', () => {
 //dibujar poligonos segun los clicks que se realicen en el mapa
 let latlngs = [];
 let polygon = null;
+let circle = null;
+let circleCenter = null;
 
-const onMapClick = (e) => {
+const onMapClickPolygon = (e) => {
     const punto = [e.latlng.lat, e.latlng.lng];
     latlngs.push(punto);
 
@@ -31,20 +33,70 @@ const onMapClick = (e) => {
     }
 };
 
-//activar modo dibujo para dibujar el poligono
-const evaluar = () => {
-    const activo = select.value === "polygon" && checkbox.checked;
+//dibujar circulos segun los clicks que se realicen en el mapa
+const onMapClickCircle = (e) => {
+    if (!circleCenter) {
+        circleCenter = e.latlng;
 
-    if (activo) {
-        console.log("mode dibujo activado");
-        map.on('click', onMapClick);
+        if (circle) {
+            map.removeLayer(circle);
+        }
+
+        circle = L.circle([circleCenter.lat, circleCenter.lng], { radius: 0 }).addTo(map);
+        return;
     }
 
+    const radio = circleCenter.distanceTo(e.latlng);
+    circle.setRadius(radio);
+    circleCenter = null;
+    map.off('mousemove', onMapMoveCircle);
+};
+
+const onMapMoveCircle = (e) => {
+    if (!circleCenter || !circle) {
+        return;
+    }
+
+    const radio = circleCenter.distanceTo(e.latlng);
+    circle.setRadius(radio);
+};
+
+//activar modo dibujo para dibujar el poligono y circulo
+const evaluar = () => {
+    const activo = checkbox.checked;
+    const modo = select.value;
+
+    map.off('click', onMapClickPolygon);
+    map.off('click', onMapClickCircle);
+    map.off('mousemove', onMapMoveCircle);
+
+    if (!activo) {
+        return;
+    }
+
+    if (modo === "polygon") {
+        console.log("mode dibujo poligono activado");
+        map.on('click', onMapClickPolygon);
+    }
+
+    if (modo === "circle") {
+        console.log("mode dibujo circulo activado");
+        map.on('click', onMapClickCircle);
+        map.on('mousemove', onMapMoveCircle);
+    }
 };
 
 limpiar.addEventListener('click', () => {
-    map.removeLayer(polygon);
-    polygon = null;
+    if (polygon) {
+        map.removeLayer(polygon);
+        polygon = null;
+    }
+    if (circle) {
+        map.removeLayer(circle);
+        circle = null;
+    }
+    circleCenter = null;
+    map.off('mousemove', onMapMoveCircle);
     latlngs = [];
 });
 
