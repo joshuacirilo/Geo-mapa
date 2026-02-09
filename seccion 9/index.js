@@ -16,6 +16,9 @@ btn.addEventListener('click', () => {
 
         const geojson = polygon.toGeoJSON();
         sidebar.innerHTML = `<pre>${JSON.stringify(geojson, null, 2)}</pre>`;
+        if (window.filtrarMarcadoresPorBounds) {
+            window.filtrarMarcadoresPorBounds(polygon.getBounds());
+        }
         return;
     }
 
@@ -32,6 +35,9 @@ btn.addEventListener('click', () => {
         };
 
         sidebar.innerHTML = `<pre>${JSON.stringify(geojson, null, 2)}</pre>`;
+        if (window.filtrarMarcadoresPorBounds) {
+            window.filtrarMarcadoresPorBounds(circle.getBounds());
+        }
         return;
     }
 
@@ -123,6 +129,9 @@ limpiar.addEventListener('click', () => {
     circleCenter = null;
     map.off('mousemove', onMapMoveCircle);
     latlngs = [];
+    if (window.resetFiltroMarcadores) {
+        window.resetFiltroMarcadores();
+    }
 });
 
 select.addEventListener('change', evaluar);

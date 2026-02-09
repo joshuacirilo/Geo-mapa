@@ -47,6 +47,13 @@ const overlays = {
     "Centros Comerciales": centrocomerciales,
 }
 
+const grupos = {
+    casas,
+    departamentos,
+    hospitales,
+    centrocomerciales,
+};
+
 const controlLayers = L.control.layers(baseLayers, overlays).addTo(map);
 
 const iconos = {
@@ -80,6 +87,13 @@ const iconos = {
     }),
 };
 
+const marcadores = {
+    casas: [],
+    departamentos: [],
+    hospitales: [],
+    centrocomerciales: [],
+};
+
 const agregarPuntos = (categoria, grupo) => {
     if (!puntos || !puntos[categoria]) {
         return;
@@ -89,6 +103,7 @@ const agregarPuntos = (categoria, grupo) => {
         const marker = L.marker([p.lat, p.lng], { icon: iconos[categoria] });
         marker.bindPopup(`${p.tipo.toUpperCase()} - ${p.id}`);
         grupo.addLayer(marker);
+        marcadores[categoria].push(marker);
     });
 };
 
@@ -96,4 +111,41 @@ agregarPuntos("casas", casas);
 agregarPuntos("departamentos", departamentos);
 agregarPuntos("hospitales", hospitales);
 agregarPuntos("centrocomerciales", centrocomerciales);
+
+const filtrarMarcadoresPorBounds = (bounds) => {
+    if (!bounds) {
+        return;
+    }
+
+    Object.entries(marcadores).forEach(([categoria, lista]) => {
+        const grupo = grupos[categoria];
+
+        if (!grupo) {
+            return;
+        }
+
+        grupo.clearLayers();
+        lista.forEach((marker) => {
+            if (bounds.contains(marker.getLatLng())) {
+                grupo.addLayer(marker);
+            }
+        });
+    });
+};
+
+const resetFiltroMarcadores = () => {
+    Object.entries(marcadores).forEach(([categoria, lista]) => {
+        const grupo = grupos[categoria];
+
+        if (!grupo) {
+            return;
+        }
+
+        grupo.clearLayers();
+        lista.forEach((marker) => grupo.addLayer(marker));
+    });
+};
+
+window.filtrarMarcadoresPorBounds = filtrarMarcadoresPorBounds;
+window.resetFiltroMarcadores = resetFiltroMarcadores;
 
