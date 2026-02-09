@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geo Json App</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet"
+        integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="./styles.css">
+
+</head>
+
+<body>
+
+    <div id="mapa"></div>
+
+    <form>
+        <select class="form-select" aria-label="Mi listado de elementos">
+            <option selected disabled value="">Elegir el tipo de entidad a crear</option>
+            <option value="circle">Circulo</option>
+            <option value="polygon">Poligono</option>
+        </select>
+
+
+        <div class="d-flex justify-content-between align-items-center at-2">
+            <div class="form-check form-switch mr-3">
+                <input id="checkbox" type="checkbox" role="switch" class="form-check-input">
+                <!--<label class="form-check-label" for="checkbox">Agrupado</label>-->
+
+                <label class="form-check-label" for="checkbox">Activar modo dibujo</label>
+
+            </div>
+
+            <button type="button" class="btn btn-primary float-end">crear</button>
+            <button id="limpiar" type="button" class="btn btn-secondary float-end">limpiar</button>
+        </div>
+    </form>
+
+
+    <div id="sidebar" class="d-flex justify-content-center align-items-center ">
+        actualmente no hay informacion
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="./js/map.js"></script>
+    <script src="./index.js"></script>
+</body>
+
+</html>

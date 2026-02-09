@@ -1,0 +1,46 @@
+html,
+body {
+    height: 100%;
+    margin: 0;
+    width: 100%;
+}
+
+#mapa {
+    height: 100%;
+    width: 70%;
+}
+
+#sidebar {
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    background-color: black;
+    width: 30%;
+    height: 100%;
+    color: white;
+    font-weight: bold;
+    max-height: 100%;
+    overflow-y: auto;
+    font-size: 0.7rem;
+}
+
+form {
+    position: absolute;
+    bottom: 0;
+    width: auto;
+    height: auto;
+
+    background-color: black;
+    border: 1px solid white;
+    border-radius: 10px;
+    z-index: 9999;
+    color: white;
+    padding: 1rem;
+    margin: 0.5rem;
+
+}
+
+button {
+
+    margin-top: 0.25rem;
+}
