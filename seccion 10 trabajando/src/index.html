@@ -9,10 +9,25 @@
 </head>
 
 <body>
+    <div id="controls">
+        <label class="control-item">
+            <input type="checkbox" id="checkbox">
+            Activar dibujo
+        </label>
+        <select class="control-item" aria-label="Selecciona figura">
+            <option value="">Selecciona figura</option>
+            <option value="polygon">Poligono</option>
+            <option value="circle">Circulo</option>
+        </select>
+        <button id="crear" class="control-item" type="button">Crear</button>
+        <button id="limpiar" class="control-item" type="button">Limpiar</button>
+    </div>
+
     <div id="map"></div>
 
     <div id="sidebar">
         <h1>leaflet-sidebar</h1>
+        <p>actualmente no hay informacion</p>
     </div>
 
 </body>
