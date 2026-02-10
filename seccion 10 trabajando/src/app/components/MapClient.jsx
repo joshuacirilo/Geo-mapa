@@ -6,8 +6,21 @@ import 'leaflet-sidebar';
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
 import iconUrl from 'leaflet/dist/images/marker-icon.png';
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
+import MapCanvas from './MapCanvas';
+import MapControls from './MapControls';
+import MapSidebar from './MapSidebar';
 
-export default function MapClient() {
+const DEFAULT_IDS = {
+  checkbox: 'checkbox',
+  select: 'shape-select',
+  create: 'crear',
+  clear: 'limpiar',
+  sidebar: 'sidebar',
+  map: 'map'
+};
+
+export default function MapClient({ ids = {} } = {}) {
+  const resolvedIds = { ...DEFAULT_IDS, ...ids };
   const mapRef = useRef(null);
   const sidebarRef = useRef(null);
 
@@ -26,7 +39,17 @@ export default function MapClient() {
       return undefined;
     }
 
-    const map = L.map(mapRef.current).setView([51.505, -0.09], 13);
+    const map = L.map(mapRef.current, {
+      center: [14.607820, -90.513863],
+      zoom: 7,
+      //zoom control son los controles del mapa que tenemos a la derecha
+      zoomControl: false,
+      attributionControl: true,
+      keyboard: true,
+      minZoom: 7,
+      maxZoom: 16,
+      maxBounds: [[18.44834670293207, -88.04443359375001], [10.692996347925087, -92.98828125]]
+    });
     const sidebarControl = L.control.sidebar(sidebarRef.current);
     map.addControl(sidebarControl);
 
@@ -35,26 +58,36 @@ export default function MapClient() {
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
 
-    const marker = L.marker([51.505, -0.09], { draggable: true }).addTo(map);
+    let markersLayer = null;
 
-    marker.on('click', () => {
-      sidebarControl.toggle();
-    });
+    const loadMarkers = async () => {
+      try {
+        const res = await fetch('/api/markers', { cache: 'no-store' });
+        if (!res.ok) {
+          return;
+        }
+        const featureCollection = await res.json();
+        if (markersLayer) {
+          markersLayer.remove();
+        }
+        markersLayer = L.geoJSON(featureCollection, {
+          onEachFeature: (_feature, layer) => {
+            const title = _feature?.properties?.title ?? 'Sin titulo';
+            layer.bindPopup(title);
+          }
+        }).addTo(map);
+      } catch (error) {
+        console.error('Error cargando markers', error);
+      }
+    };
 
-    marker.on('drag', () => {
-      const { lat, lng } = marker.getLatLng();
-      sidebarControl.setContent(`
-        <h2>Informacion</h2>
-        <p>Latitud: ${lat}</p>
-        <p>Longitud: ${lng}</p>
-      `);
-    });
+    loadMarkers();
 
-    const btn = document.querySelector('#crear');
-    const select = document.querySelector('select');
-    const checkbox = document.querySelector('#checkbox');
-    const limpiar = document.querySelector('#limpiar');
-    const sidebarEl = document.querySelector('#sidebar');
+    const btn = document.querySelector(`#${resolvedIds.create}`);
+    const select = document.querySelector(`#${resolvedIds.select}`);
+    const checkbox = document.querySelector(`#${resolvedIds.checkbox}`);
+    const limpiar = document.querySelector(`#${resolvedIds.clear}`);
+    const sidebarEl = document.querySelector(`#${resolvedIds.sidebar}`);
 
     const setSidebarHtml = (html) => {
       if (sidebarControl && typeof sidebarControl.setContent === 'function') {
@@ -213,7 +246,9 @@ export default function MapClient() {
       limpiar?.removeEventListener('click', onLimpiar);
       select?.removeEventListener('change', evaluar);
       checkbox?.removeEventListener('change', evaluar);
-      marker.off();
+      if (markersLayer) {
+        markersLayer.remove();
+      }
       map.off();
       map.remove();
     };
@@ -221,30 +256,14 @@ export default function MapClient() {
 
   return (
     <>
-      <div id="controls">
-        <label className="control-item">
-          <input type="checkbox" id="checkbox" />
-          Activar dibujo
-        </label>
-        <select className="control-item" aria-label="Selecciona figura">
-          <option value="">Selecciona figura</option>
-          <option value="polygon">Poligono</option>
-          <option value="circle">Circulo</option>
-        </select>
-        <button id="crear" className="control-item" type="button">
-          Crear
-        </button>
-        <button id="limpiar" className="control-item" type="button">
-          Limpiar
-        </button>
-      </div>
-
-      <div id="map" ref={mapRef} />
-
-      <div id="sidebar" ref={sidebarRef}>
-        <h1>leaflet-sidebar</h1>
-        <p>actualmente no hay informacion</p>
-      </div>
+      <MapControls
+        checkboxId={resolvedIds.checkbox}
+        selectId={resolvedIds.select}
+        createId={resolvedIds.create}
+        clearId={resolvedIds.clear}
+      />
+      <MapCanvas id={resolvedIds.map} ref={mapRef} />
+      <MapSidebar id={resolvedIds.sidebar} ref={sidebarRef} />
     </>
   );
 }

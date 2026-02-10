@@ -1,19 +1,19 @@
 // images
-import shadowImg from '../../node_modules/leaflet/dist/images/marker-shadow.png';
-import markerImg from '../../node_modules/leaflet/dist/images/marker-icon.png';
+import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
+import iconUrl from 'leaflet/dist/images/marker-icon.png';
+import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
 
 
 // css
-import '../../node_modules/leaflet/dist/leaflet.css';
-import '../../node_modules/leaflet-sidebar/src/L.Control.Sidebar.css';
+import 'leaflet/dist/leaflet.css';
+import 'leaflet-sidebar/src/L.Control.Sidebar.css';
 
 // js
 import * as L from 'leaflet'
 import 'leaflet-sidebar'
 
-L.Marker.prototype.setIcon(
-    L.icon({
-        iconUrl: markerImg,
-        shadowUrl: shadowImg
-    })
-);
+L.Icon.Default.mergeOptions({
+    iconRetinaUrl,
+    iconUrl,
+    shadowUrl
+});
