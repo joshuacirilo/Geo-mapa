@@ -29,10 +29,16 @@ export default function MapClient({ ids = {} } = {}) {
       return undefined;
     }
 
+    const resolvedIconUrl = typeof iconUrl === 'string' ? iconUrl : iconUrl?.src;
+    const resolvedIconRetinaUrl =
+      typeof iconRetinaUrl === 'string' ? iconRetinaUrl : iconRetinaUrl?.src;
+    const resolvedShadowUrl =
+      typeof shadowUrl === 'string' ? shadowUrl : shadowUrl?.src;
+
     L.Icon.Default.mergeOptions({
-      iconRetinaUrl,
-      iconUrl,
-      shadowUrl
+      iconRetinaUrl: resolvedIconRetinaUrl,
+      iconUrl: resolvedIconUrl,
+      shadowUrl: resolvedShadowUrl
     });
 
     if (!mapRef.current || !sidebarRef.current) {

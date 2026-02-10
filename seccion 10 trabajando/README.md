@@ -1,85 +1,142 @@
-# Geo-mapa (Seccion 9)
+# Geo-mapa (Next + Leaflet)
 
-Proyecto base con Leaflet para:
-- Dibujar poligonos y circulos en el mapa.
+Proyecto en Next.js con Leaflet para:
+- Mostrar marcadores desde una API (`/api/markers`).
+- Dibujar poligonos y circulos.
 - Exportar la figura a GeoJSON y mostrarla en el sidebar.
-- Mostrar puntos por categoria (opcional).
 
-Este README esta enfocado en integrar el modulo a otro proyecto, conservando la opcion de dibujar figuras y mostrar su GeoJSON. La data de marcadores es opcional.
+Este README te permite recrear el proyecto en otra carpeta y entender la
+estructura, arquitectura, flujo y funciones actuales.
 
 ## Requisitos
-- Navegador moderno.
-- Leaflet (CDN).
-- Font Awesome (solo si usas iconos personalizados).
+- Node.js 18+ (recomendado) y npm.
+- Base de datos configurada para Prisma (ver `.env`).
 
-## Estructura relevante
-- `index.html` Carga Leaflet, `points.js`, `js/map.js` y `index.js`.
-- `js/map.js` Inicializa el mapa, capas y (opcionalmente) puntos.
-- `index.js` Maneja el modo dibujo, eventos del mapa y exportacion GeoJSON.
-- `styles.css` Estilos basicos del layout e iconos.
-- `points.js` (Opcional) Dataset de puntos por categoria.
-
-## Integracion rapida
-1. Copia estos archivos a tu proyecto:
-   - `index.js`
-   - `js/map.js`
-   - `styles.css`
-2. Asegurate de incluir Leaflet en tu HTML.
-3. Si no necesitas puntos, puedes omitir `points.js` y eliminar la logica de puntos en `js/map.js`.
-
-## HTML minimo
-```html
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-<link rel="stylesheet" href="./styles.css">
-
-<div id="mapa"></div>
-<div id="sidebar">actualmente no hay informacion</div>
-
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="./js/map.js"></script>
-<script src="./index.js"></script>
+## Crear el proyecto desde cero
+1. Crea la carpeta y entra:
+```bash
+mkdir geo-mapa
+cd geo-mapa
 ```
 
-Si usas puntos con iconos personalizados:
-```html
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css">
-<script src="./points.js"></script>
+2. Inicializa Next:
+```bash
+npx create-next-app@latest .
 ```
 
-## Como funciona el dibujo
-En `index.js`:
-- Poligono: cada click agrega un punto. Se completa con 3 o mas puntos.
-- Circulo: primer click define el centro, segundo click define el radio. El radio se actualiza con `mousemove`.
-- Boton `crear`: exporta la figura a GeoJSON y lo muestra en `#sidebar`.
+3. Instala dependencias:
+```bash
+npm i leaflet leaflet-sidebar
+npm i prisma @prisma/client
+```
 
-### Exportacion GeoJSON
-Se usa `toGeoJSON()` de Leaflet:
+4. Copia la estructura y archivos desde este repo (seccion de estructura).
+5. Configura `.env` y Prisma:
+```bash
+npx prisma generate
+```
+
+6. Levanta el proyecto:
+```bash
+npm run dev
+```
+
+## Estructura
+```
+src/
+  app/
+    api/
+      markers/
+        route.js         # API de markers (GET/POST)
+    components/
+      MapClient.jsx      # Inicializa Leaflet y orquesta logica
+      MapControls.jsx    # Controles UI (checkbox, select, botones)
+      MapCanvas.jsx      # Contenedor del mapa
+      MapSidebar.jsx     # Sidebar para GeoJSON
+    globals.css          # CSS global + Leaflet CSS
+    layout.js
+    page.js              # Renderiza MapClient
+  app/lib/
+    prisma.js            # Cliente Prisma (si aplica)
+prisma/
+  schema.prisma
+```
+
+## Arquitectura
+- **Cliente**: `MapClient.jsx` (React client component) crea el mapa Leaflet
+  y maneja la logica de dibujo, sidebar y markers.
+- **UI separada**: `MapControls`, `MapCanvas`, `MapSidebar` son componentes
+  reutilizables de presentacion.
+- **Backend**: `/api/markers` expone los markers como GeoJSON.
+- **Datos**: Prisma obtiene markers desde la base de datos.
+
+## Flujo general
+1. `page.js` renderiza `<MapClient />`.
+2. `MapClient` monta Leaflet en `MapCanvas`.
+3. `MapClient` carga markers desde `/api/markers` y los agrega como GeoJSON.
+4. Controles permiten activar dibujo y crear figuras.
+5. Al crear, se genera GeoJSON y se muestra en `MapSidebar`.
+
+## Componentes y funciones
+
+### `MapClient.jsx`
+- Inicializa Leaflet con opciones del mapa (center, zoom, bounds).
+- Configura iconos default (`L.Icon.Default.mergeOptions`).
+- Crea sidebar con `leaflet-sidebar`.
+- Carga markers con `fetch('/api/markers')`.
+- Dibujo:
+  - Poligono: cada click agrega un punto.
+  - Circulo: primer click define centro, segundo click define radio.
+  - `Crear` exporta GeoJSON y lo renderiza en el sidebar.
+  - `Limpiar` borra figura y resetea estado.
+
+### `MapControls.jsx`
+UI de controles:
+- Checkbox: activar dibujo.
+- Select: tipo de figura (`polygon` o `circle`).
+- Botones: `Crear`, `Limpiar`.
+
+### `MapCanvas.jsx`
+Contenedor del mapa Leaflet (div con id configurable).
+
+### `MapSidebar.jsx`
+Contenedor del sidebar donde se imprime el GeoJSON.
+
+### `/api/markers/route.js`
+Endpoints:
+- `GET`: devuelve FeatureCollection.
+- `POST`: crea un marker con `id_public`, `title`, `categoria`, `geojson`.
+
+## Configuracion del mapa
+Las opciones del mapa se definen en `src/app/components/MapClient.jsx`
+en el constructor:
 ```js
-const geojson = polygon.toGeoJSON();
-// o
-const geojson = circle.toGeoJSON();
-geojson.properties = {
-  ...geojson.properties,
-  radius: circle.getRadius(), // el radio no existe en GeoJSON estandar
-};
+const map = L.map(mapRef.current, {
+  center: [14.607820, -90.513863],
+  zoom: 7,
+  zoomControl: false,
+  attributionControl: true,
+  keyboard: true,
+  minZoom: 7,
+  maxZoom: 16,
+  maxBounds: [[18.44834670293207, -88.04443359375001], [10.692996347925087, -92.98828125]]
+});
 ```
 
-## Puntos por categoria (opcional)
-Si quieres mantener los puntos:
-- `points.js` define el objeto `puntos`.
-- `js/map.js` crea `featureGroup` por categoria y los agrega como overlays.
-Puedes eliminar esta parte si no necesitas los puntos en tu integracion.
+## CSS global
+`src/app/globals.css` importa los estilos de Leaflet y sidebar:
+```css
+@import "leaflet/dist/leaflet.css";
+@import "leaflet-sidebar/src/L.Control.Sidebar.css";
+```
 
 ## Notas de integracion
-- El mapa usa el div `#mapa` y el sidebar usa `#sidebar`.
-- El boton `crear` y los controles estan en `index.html`. Puedes moverlos a tu layout, pero conserva los `id`:
-  - `#checkbox` (activar modo dibujo)
-  - `#limpiar` (limpiar figura)
-  - `select` (seleccion de figura)
-- Si deseas separar responsabilidades, puedes mover el codigo de dibujo a un modulo y exponer funciones publicas.
+- Los IDs de controles pueden configurarse pasando `ids` a `MapClient`.
+- Los markers deben venir como GeoJSON (Point) desde la API.
+- Si el icono por defecto no aparece, asegurate de que `MapClient.jsx`
+  resuelva correctamente las URLs (`iconUrl?.src`).
 
 ## Sugerencias de extension
-- Guardar el GeoJSON en un backend.
-- Agregar validacion espacial (por ejemplo, puntos dentro del poligono).
-- Permitir editar o mover figuras existentes.
-
+- Guardar GeoJSON generado en backend.
+- Filtrar markers por bounds del poligono/circulo.
+- Edicion de figuras existentes.
