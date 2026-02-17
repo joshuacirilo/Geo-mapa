@@ -3,12 +3,14 @@
 import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet-sidebar';
+import 'leaflet-choropleth';
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
 import iconUrl from 'leaflet/dist/images/marker-icon.png';
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
 import MapCanvas from './MapCanvas';
 import MapControls from './MapControls';
 import MapSidebar from './MapSidebar';
+import localGeojson from '../../data/geojson.json';
 
 const DEFAULT_IDS = {
   checkbox: 'checkbox',
@@ -16,6 +18,7 @@ const DEFAULT_IDS = {
   create: 'crear',
   clear: 'limpiar',
   sidebar: 'sidebar',
+  sidebarToggle: 'sidebar-toggle',
   map: 'map'
 };
 
@@ -66,58 +69,124 @@ export default function MapClient({ ids = {} } = {}) {
 
     let markersLayer = null;
 
-    const loadMarkers = async () => {
-      try {
-        const res = await fetch('/api/markers', { cache: 'no-store' });
-        if (!res.ok) {
-          return;
-        }
-        const featureCollection = await res.json();
-        if (markersLayer) {
-          markersLayer.remove();
-        }
-        markersLayer = L.geoJSON(featureCollection, {
-          onEachFeature: (_feature, layer) => {
-            const title = _feature?.properties?.title ?? 'Sin titulo';
-            layer.bindPopup(title);
+    const choroplethData = {
+      ...localGeojson,
+      features: (localGeojson.features ?? []).map((feature) => {
+        const rawIncidents = Number(feature?.properties?.incidents);
+        const fallbackIncidents = Number(feature?.properties?.zona ?? 0);
+
+        return {
+          ...feature,
+          properties: {
+            ...feature.properties,
+            incidents: Number.isFinite(rawIncidents) ? rawIncidents : fallbackIncidents
           }
-        }).addTo(map);
-      } catch (error) {
-        console.error('Error cargando markers', error);
-      }
+        };
+      })
     };
 
-    loadMarkers();
+    if (markersLayer) {
+      markersLayer.remove();
+    }
+    markersLayer = L.choropleth(choroplethData, {
+      valueProperty: 'incidents',
+      scale: ['white', 'red'],
+      steps: 5,
+      mode: 'q',
+      style: {
+        color: '#fff',
+        weight: 2,
+        fillOpacity: 0.35
+      },
+      onEachFeature: (_feature, layer) => {
+        const title = _feature?.properties?.title ?? 'Sin titulo';
+        const nombre = _feature?.properties?.nombre ?? title;
+        const zona = _feature?.properties?.zona ?? 'N/A';
+        const incidents = _feature?.properties?.incidents ?? 0;
+        layer.bindPopup(
+          `<strong>${nombre}</strong><br/>Zona: ${zona}<br/>Incidents: ${incidents}`
+        );
+      }
+    }).addTo(map);
 
     const btn = document.querySelector(`#${resolvedIds.create}`);
     const select = document.querySelector(`#${resolvedIds.select}`);
     const checkbox = document.querySelector(`#${resolvedIds.checkbox}`);
     const limpiar = document.querySelector(`#${resolvedIds.clear}`);
     const sidebarEl = document.querySelector(`#${resolvedIds.sidebar}`);
+    const sidebarToggle = document.querySelector(`#${resolvedIds.sidebarToggle}`);
+
+    const isSidebarVisible = () => {
+      if (sidebarControl && typeof sidebarControl.isVisible === 'function') {
+        return sidebarControl.isVisible();
+      }
+      return sidebarEl ? sidebarEl.style.display !== 'none' : false;
+    };
+
+    const updateSidebarToggleUi = () => {
+      if (!sidebarToggle) {
+        return;
+      }
+      const visible = isSidebarVisible();
+      sidebarToggle.textContent = visible ? '\u25c0' : '\u25b6';
+      sidebarToggle.setAttribute(
+        'aria-label',
+        visible ? 'Ocultar sidebar' : 'Mostrar sidebar'
+      );
+    };
+
+    const setSidebarVisible = (nextVisible) => {
+      if (nextVisible) {
+        if (sidebarControl && typeof sidebarControl.show === 'function') {
+          sidebarControl.show();
+        } else if (sidebarEl) {
+          sidebarEl.style.display = 'block';
+        }
+      } else if (sidebarControl && typeof sidebarControl.hide === 'function') {
+        sidebarControl.hide();
+      } else if (sidebarEl) {
+        sidebarEl.style.display = 'none';
+      }
+
+      updateSidebarToggleUi();
+    };
+
+    const onToggleSidebar = () => {
+      if (sidebarControl && typeof sidebarControl.toggle === 'function') {
+        sidebarControl.toggle();
+        updateSidebarToggleUi();
+        return;
+      }
+      setSidebarVisible(!isSidebarVisible());
+    };
+
+    if (sidebarToggle) {
+      L.DomEvent.disableClickPropagation(sidebarToggle);
+      L.DomEvent.disableScrollPropagation(sidebarToggle);
+    }
+    updateSidebarToggleUi();
 
     const setSidebarHtml = (html) => {
       if (sidebarControl && typeof sidebarControl.setContent === 'function') {
         sidebarControl.setContent(html);
-        if (typeof sidebarControl.show === 'function') {
-          sidebarControl.show();
-        }
+        setSidebarVisible(true);
         return;
       }
       if (sidebarEl) {
         sidebarEl.innerHTML = html;
+        setSidebarVisible(true);
       }
     };
 
     const setSidebarText = (text) => {
       if (sidebarControl && typeof sidebarControl.setContent === 'function') {
         sidebarControl.setContent(`<p>${text}</p>`);
-        if (typeof sidebarControl.show === 'function') {
-          sidebarControl.show();
-        }
+        setSidebarVisible(true);
         return;
       }
       if (sidebarEl) {
         sidebarEl.textContent = text;
+        setSidebarVisible(true);
       }
     };
 
@@ -246,12 +315,14 @@ export default function MapClient({ ids = {} } = {}) {
     limpiar?.addEventListener('click', onLimpiar);
     select?.addEventListener('change', evaluar);
     checkbox?.addEventListener('change', evaluar);
+    sidebarToggle?.addEventListener('click', onToggleSidebar);
 
     return () => {
       btn?.removeEventListener('click', onCrear);
       limpiar?.removeEventListener('click', onLimpiar);
       select?.removeEventListener('change', evaluar);
       checkbox?.removeEventListener('change', evaluar);
+      sidebarToggle?.removeEventListener('click', onToggleSidebar);
       if (markersLayer) {
         markersLayer.remove();
       }
@@ -270,6 +341,7 @@ export default function MapClient({ ids = {} } = {}) {
       />
       <MapCanvas id={resolvedIds.map} ref={mapRef} />
       <MapSidebar id={resolvedIds.sidebar} ref={sidebarRef} />
+      <button id={resolvedIds.sidebarToggle} className="sidebar-toggle" type="button" />
     </>
   );
 }
