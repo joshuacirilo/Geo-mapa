@@ -4,3 +4,5 @@ dist/
 .env
 .next/
 out/
+
+README_Leaflet.md

@@ -1,5 +1,6 @@
 @import "leaflet/dist/leaflet.css";
 @import "leaflet-sidebar/src/L.Control.Sidebar.css";
+@import "leaflet-easybutton/src/easy-button.css";
 
 html,
 body {
@@ -62,3 +63,13 @@ body {
   line-height: 1;
   cursor: pointer;
 }
+
+.leaflet-bottom.leaflet-right .leaflet-control-minimap {
+  clear: none;
+}
+
+.leaflet-bottom.leaflet-right .leaflet-control-minimap + .leaflet-control-minimap {
+  margin-right: 8px;
+}
+
+

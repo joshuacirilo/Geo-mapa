@@ -527,4 +527,215 @@ const choroplethLayer = L.choropleth(choroplethData, {
 - `mode`: tipo de clasificacion (`q` cuantiles, `e` equidistante, `k` k-means).
 - `fillOpacity`: transparencia del relleno.
 
+---
+
+## EasyButton: boton en mapa y cambio de icono al click
+Esta seccion resume todo lo que hicimos para agregar `leaflet-easybutton` y cambiar iconos por estado.
+
+### 1) Instalar paquete
+```bash
+npm i leaflet-easybutton
+```
+
+### 2) Cargar Font Awesome (iconos)
+En `src/app/layout.js` agrega en `<head>`:
+
+```jsx
+<link
+  rel="stylesheet"
+  href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css"
+  integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw=="
+  crossOrigin="anonymous"
+  referrerPolicy="no-referrer"
+/>
+```
+
+### 3) Importar plugin y CSS
+En `src/app/components/MapClient.jsx`:
+
+```jsx
+import 'leaflet-easybutton';
+```
+
+En `src/app/globals.css`:
+
+```css
+@import "leaflet-easybutton/src/easy-button.css";
+```
+
+### 4) Crear popup base
+Dentro del `useEffect`, despues de crear `map`:
+
+```jsx
+const helloPopup = L.popup().setContent('Hello World!');
+```
+
+### 5) Crear boton en la derecha y cambiar icono por click
+Este ejemplo inicia con poligono y al click cambia a mano. En el siguiente click vuelve a poligono:
+
+```jsx
+const helloButton = L.easyButton({
+  position: 'topright',
+  states: [
+    {
+      stateName: 'polygon',
+      icon: 'fa-solid fa-draw-polygon',
+      title: 'Mostrar popup',
+      onClick: (btn, leafletMap) => {
+        helloPopup.setLatLng(leafletMap.getCenter()).openOn(leafletMap);
+        btn.state('hand');
+      }
+    },
+    {
+      stateName: 'hand',
+      icon: 'fa-regular fa-hand',
+      title: 'Mostrar popup',
+      onClick: (btn, leafletMap) => {
+        helloPopup.setLatLng(leafletMap.getCenter()).openOn(leafletMap);
+        btn.state('polygon');
+      }
+    }
+  ]
+}).addTo(map);
+```
+
+### 6) Limpieza al desmontar
+En el `return` de limpieza del `useEffect`:
+
+```jsx
+if (helloButton) {
+  map.removeControl(helloButton);
+}
+map.closePopup(helloPopup);
+```
+
+Con esto puedes replicar el boton en otro proyecto Next.js con Leaflet y tener cambio de icono por estado al hacer click.
+
+---
+
+## Marcador personalizado con `L.divIcon` (sin clase CSS)
+Usa `L.divIcon` con `html` cuando quieras renderizar un icono Font Awesome directamente, sin crear una clase CSS adicional.
+
+### 1) Crear el `divIcon` en `MapClient.jsx`
+Dentro de `useEffect`, despues de crear `map`:
+
+```jsx
+const divIcon = L.divIcon({
+  className: '',
+  html: '<i class="fa-regular fa-house"></i>',
+  iconSize: [18, 18],
+  iconAnchor: [9, 18]
+});
+```
+
+### 2) Crear marcador con ese icono
+```jsx
+const fixedMarker = L.marker([14.788409, -90.195652], { icon: divIcon })
+  .addTo(map)
+  .bindPopup('Marcador fijo');
+
+fixedMarker.openPopup();
+map.panTo(fixedMarker.getLatLng());
+```
+
+### 3) Limpiar al desmontar
+```jsx
+if (fixedMarker) {
+  fixedMarker.remove();
+}
+```
+
+Con esto ya puedes reutilizar marcadores visuales personalizados en cualquier proyecto Next.js + Leaflet.
+
+---
+
+## EasyButton + MiniMap (version actual)
+Esta parte resume la implementacion actual del proyecto para mostrar/ocultar minimapas con un `easyButton`.
+
+### 1) Instalar paquetes
+```bash
+npm i leaflet-minimap
+```
+
+### 2) Imports necesarios
+En `src/app/components/MapClient.jsx`:
+
+```jsx
+import 'leaflet-easybutton';
+import 'leaflet-minimap';
+import 'leaflet-minimap/dist/Control.MiniMap.min.css';
+```
+
+En `src/app/globals.css`:
+
+```css
+@import "leaflet-easybutton/src/easy-button.css";
+```
+
+### 3) Clases de icono usadas en easyButton
+- Boton para minimapas:
+  - abierto: `fa-regular fa-map`
+  - cerrar: `fa-solid fa-x`
+- Boton de ejemplo de figura:
+  - `fa-solid fa-draw-polygon`
+  - `fa-regular fa-hand`
+
+### 4) EasyButton para desplegar/ocultar minimapas
+```jsx
+const miniMapToggleButton = L.easyButton({
+  position: 'topright',
+  states: [
+    {
+      stateName: 'open-minimap',
+      icon: 'fa-regular fa-map',
+      title: 'Mostrar minimapa',
+      onClick: (btn) => {
+        miniMapBaseControl.addTo(map);
+        miniMapDarkControl.addTo(map);
+        miniMapThunderControl.addTo(map);
+        miniMapTonerControl.addTo(map);
+        btn.state('close-minimap');
+      }
+    },
+    {
+      stateName: 'close-minimap',
+      icon: 'fa-solid fa-x',
+      title: 'Ocultar minimapa',
+      onClick: (btn) => {
+        map.removeControl(miniMapBaseControl);
+        map.removeControl(miniMapDarkControl);
+        map.removeControl(miniMapThunderControl);
+        map.removeControl(miniMapTonerControl);
+        btn.state('open-minimap');
+      }
+    }
+  ]
+}).addTo(map);
+```
+
+### 5) Mapas que estamos usando
+- Mapa grande inicial:
+  - OpenStreetMap (`https://tile.openstreetmap.org/{z}/{x}/{y}.png`)
+- Mini mapa 1 (base):
+  - OpenStreetMap
+- Mini mapa 2:
+  - Stadia `alidade_satellite`
+- Mini mapa 3:
+  - Stadia `stamen_terrain`
+- Mini mapa 4:
+  - Stadia `stamen_toner_background`
+
+### 5.1) Links de cada mapa (tile URLs)
+- OpenStreetMap:
+  - `https://tile.openstreetmap.org/{z}/{x}/{y}.png`
+- Stadia `alidade_satellite`:
+  - `https://tiles.stadiamaps.com/tiles/alidade_satellite/{z}/{x}/{y}{r}.{ext}`
+- Stadia `stamen_terrain`:
+  - `https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.{ext}`
+- Stadia `stamen_toner_background`:
+  - `https://tiles.stadiamaps.com/tiles/stamen_toner_background/{z}/{x}/{y}{r}.{ext}`
+
+### 6) Cambio del mapa grande al click en minimapa
+Cada minimapa tiene su handler `on('click', ...)` para ejecutar `mainBaseMap.setUrl(...)` y cambiar la capa principal al estilo seleccionado.
+
 

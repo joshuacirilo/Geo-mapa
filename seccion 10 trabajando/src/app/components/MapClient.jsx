@@ -4,6 +4,9 @@ import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet-sidebar';
 import 'leaflet-choropleth';
+import 'leaflet-easybutton';
+import 'leaflet-minimap';
+import 'leaflet-minimap/dist/Control.MiniMap.min.css';
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png';
 import iconUrl from 'leaflet/dist/images/marker-icon.png';
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png';
@@ -26,6 +29,10 @@ export default function MapClient({ ids = {} } = {}) {
   const resolvedIds = { ...DEFAULT_IDS, ...ids };
   const mapRef = useRef(null);
   const sidebarRef = useRef(null);
+  const guatemalaBounds = [
+    [18.44834670293207, -88.04443359375001],
+    [10.692996347925087, -92.98828125]
+  ];
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -49,22 +56,190 @@ export default function MapClient({ ids = {} } = {}) {
     }
 
     const map = L.map(mapRef.current, {
-      center: [14.607820, -90.513863],
-      zoom: 7,
+      center: [14.602416, -90.517302],
+      zoom: 12,
       //zoom control son los controles del mapa que tenemos a la derecha
       zoomControl: false,
       attributionControl: true,
       keyboard: true,
       minZoom: 7,
       maxZoom: 16,
-      maxBounds: [[18.44834670293207, -88.04443359375001], [10.692996347925087, -92.98828125]]
+      maxBounds: guatemalaBounds
     });
     const sidebarControl = L.control.sidebar(sidebarRef.current);
     map.addControl(sidebarControl);
 
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    const osmUrl = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    const alidadeSatelliteUrl =
+      'https://tiles.stadiamaps.com/tiles/alidade_satellite/{z}/{x}/{y}{r}.{ext}';
+    const alidadeSatelliteAttribution =
+      '&copy; CNES, Distribution Airbus DS, © Airbus DS, © PlanetObserver (Contains Copernicus Data) | &copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+    const terrainUrl = 'https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.{ext}';
+    const terrainAttribution =
+      '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://www.stamen.com/" target="_blank">Stamen Design</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+    const tonerBackgroundUrl =
+      'https://tiles.stadiamaps.com/tiles/stamen_toner_background/{z}/{x}/{y}{r}.{ext}';
+    const tonerBackgroundAttribution =
+      '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://www.stamen.com/" target="_blank">Stamen Design</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+
+    const mainBaseMap = L.tileLayer(osmUrl, {
+      maxZoom: 19,
       attribution:
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    const miniBaseMap = L.tileLayer(osmUrl, {
+      maxZoom: 19,
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+
+    const miniDarkMap = L.tileLayer(alidadeSatelliteUrl, {
+      minZoom: 0,
+      maxZoom: 22,
+      attribution: alidadeSatelliteAttribution,
+      ext: 'jpg'
+    });
+    const miniThunderMap = L.tileLayer(terrainUrl, {
+      minZoom: 0,
+      maxZoom: 18,
+      attribution: terrainAttribution,
+      ext: 'png'
+    });
+    const miniTonerMap = L.tileLayer(tonerBackgroundUrl, {
+      minZoom: 0,
+      maxZoom: 20,
+      attribution: tonerBackgroundAttribution,
+      ext: 'png'
+    });
+
+    const miniMapBaseControl = new L.Control.MiniMap(miniBaseMap, {
+      position: 'bottomright'
+    });
+    const miniMapDarkControl = new L.Control.MiniMap(miniDarkMap, {
+      position: 'bottomright'
+    });
+    const miniMapThunderControl = new L.Control.MiniMap(miniThunderMap, {
+      position: 'bottomright'
+    });
+    const miniMapTonerControl = new L.Control.MiniMap(miniTonerMap, {
+      position: 'bottomright'
+    });
+
+    const onBaseMiniMapClick = (e) => {
+      if (e?.originalEvent) {
+        L.DomEvent.stop(e.originalEvent);
+      }
+      mainBaseMap.options.maxZoom = 19;
+      mainBaseMap.options.attribution =
+        '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+      mainBaseMap.setUrl(osmUrl);
+    };
+
+    const onDarkMiniMapClick = (e) => {
+      if (e?.originalEvent) {
+        L.DomEvent.stop(e.originalEvent);
+      }
+      mainBaseMap.options.maxZoom = 20;
+      mainBaseMap.options.attribution = alidadeSatelliteAttribution;
+      mainBaseMap.options.ext = 'jpg';
+      mainBaseMap.setUrl(alidadeSatelliteUrl);
+    };
+
+    const onThunderMiniMapClick = (e) => {
+      if (e?.originalEvent) {
+        L.DomEvent.stop(e.originalEvent);
+      }
+      mainBaseMap.options.maxZoom = 18;
+      mainBaseMap.options.attribution = terrainAttribution;
+      mainBaseMap.options.ext = 'png';
+      mainBaseMap.setUrl(terrainUrl);
+    };
+
+    const onTonerMiniMapClick = (e) => {
+      if (e?.originalEvent) {
+        L.DomEvent.stop(e.originalEvent);
+      }
+      mainBaseMap.options.maxZoom = 20;
+      mainBaseMap.options.attribution = tonerBackgroundAttribution;
+      mainBaseMap.options.ext = 'png';
+      mainBaseMap.setUrl(tonerBackgroundUrl);
+    };
+
+    const miniMapToggleButton = L.easyButton({
+      position: 'topright',
+      states: [
+        {
+          stateName: 'open-minimap',
+          icon: 'fa-regular fa-map',
+          title: 'Mostrar minimapa',
+          onClick: (btn) => {
+            miniMapBaseControl.addTo(map);
+            miniMapDarkControl.addTo(map);
+            miniMapThunderControl.addTo(map);
+            miniMapTonerControl.addTo(map);
+            miniMapBaseControl._miniMap?.on('click', onBaseMiniMapClick);
+            miniMapDarkControl._miniMap?.on('click', onDarkMiniMapClick);
+            miniMapThunderControl._miniMap?.on('click', onThunderMiniMapClick);
+            miniMapTonerControl._miniMap?.on('click', onTonerMiniMapClick);
+            btn.state('close-minimap');
+          }
+        },
+        {
+          stateName: 'close-minimap',
+          icon: 'fa-solid fa-x',
+          title: 'Ocultar minimapa',
+          onClick: (btn) => {
+            miniMapBaseControl._miniMap?.off('click', onBaseMiniMapClick);
+            miniMapDarkControl._miniMap?.off('click', onDarkMiniMapClick);
+            miniMapThunderControl._miniMap?.off('click', onThunderMiniMapClick);
+            miniMapTonerControl._miniMap?.off('click', onTonerMiniMapClick);
+            map.removeControl(miniMapBaseControl);
+            map.removeControl(miniMapDarkControl);
+            map.removeControl(miniMapThunderControl);
+            map.removeControl(miniMapTonerControl);
+            btn.state('open-minimap');
+          }
+        }
+      ]
+    }).addTo(map);
+
+    const divIcon = L.divIcon({
+      className: '',
+      html: '<i class="fa-regular fa-house"></i>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 18]
+    });
+
+    const fixedMarker = L.marker([14.788409, -90.195652], { icon: divIcon })
+      .addTo(map)
+      .bindPopup('Marcador fijo');
+    fixedMarker.openPopup();
+    map.panTo(fixedMarker.getLatLng());
+
+    const helloPopup = L.popup().setContent('Hello World!');
+    const helloButton = L.easyButton({
+      position: 'topright',
+      states: [
+        {
+          stateName: 'polygon',
+          icon: 'fa-solid fa-draw-polygon',
+          title: 'Mostrar popup',
+          onClick: (btn, leafletMap) => {
+            helloPopup.setLatLng(leafletMap.getCenter()).openOn(leafletMap);
+            btn.state('hand');
+          }
+        },
+        {
+          stateName: 'hand',
+          icon: 'fa-regular fa-hand',
+          title: 'Mostrar popup',
+          onClick: (btn, leafletMap) => {
+            helloPopup.setLatLng(leafletMap.getCenter()).openOn(leafletMap);
+            btn.state('polygon');
+          }
+        }
+      ]
     }).addTo(map);
 
     let markersLayer = null;
@@ -233,6 +408,23 @@ export default function MapClient({ ids = {} } = {}) {
       circle.setRadius(radio);
     };
 
+    const onMapMouseMoveDebug = (e) => {
+      const mapaBounds = map.getBounds();
+      const zoomActual = map.getZoom();
+
+      console.log('--- MAP DEBUG ---');
+      console.log('Zoom:', zoomActual);
+      console.log('Mouse lat/lng:', e.latlng.lat, e.latlng.lng);
+      console.log('NorthWest:', mapaBounds.getNorthWest());
+      console.log('SouthEast:', mapaBounds.getSouthEast());
+      console.log('maxBounds sugerido:', [
+        [mapaBounds.getNorth(), mapaBounds.getEast()],
+        [mapaBounds.getSouth(), mapaBounds.getWest()]
+      ]);
+    };
+
+    map.on('mousemove', onMapMouseMoveDebug);
+
     const evaluar = () => {
       const activo = checkbox?.checked;
       const modo = select?.value;
@@ -323,9 +515,28 @@ export default function MapClient({ ids = {} } = {}) {
       select?.removeEventListener('change', evaluar);
       checkbox?.removeEventListener('change', evaluar);
       sidebarToggle?.removeEventListener('click', onToggleSidebar);
+      if (helloButton) {
+        map.removeControl(helloButton);
+      }
+      if (miniMapToggleButton) {
+        map.removeControl(miniMapToggleButton);
+      }
+      miniMapBaseControl._miniMap?.off('click', onBaseMiniMapClick);
+      miniMapDarkControl._miniMap?.off('click', onDarkMiniMapClick);
+      miniMapThunderControl._miniMap?.off('click', onThunderMiniMapClick);
+      miniMapTonerControl._miniMap?.off('click', onTonerMiniMapClick);
+      map.removeControl(miniMapBaseControl);
+      map.removeControl(miniMapDarkControl);
+      map.removeControl(miniMapThunderControl);
+      map.removeControl(miniMapTonerControl);
+      map.closePopup(helloPopup);
       if (markersLayer) {
         markersLayer.remove();
       }
+      if (fixedMarker) {
+        fixedMarker.remove();
+      }
+      map.off('mousemove', onMapMouseMoveDebug);
       map.off();
       map.remove();
     };
