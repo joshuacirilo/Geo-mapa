@@ -120,4 +120,20 @@ body {
   flex: 0 0 10px;
 }
 
+.osm-category-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.osm-category-group h5 {
+  margin: 4px 0;
+  text-transform: capitalize;
+}
+
+.osm-category-group ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
 

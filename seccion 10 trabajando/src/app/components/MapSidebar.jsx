@@ -12,6 +12,7 @@ const MapSidebar = forwardRef(function MapSidebar(
     statusMessage = '',
     errorMessage = '',
     analysisItems = [],
+    osmCategories = null,
     children
   },
   ref
@@ -28,6 +29,31 @@ const MapSidebar = forwardRef(function MapSidebar(
       {children}
       {statusMessage ? <p>{statusMessage}</p> : null}
       {errorMessage ? <p>{errorMessage}</p> : null}
+      {osmCategories ? (
+        <article className="sidebar-analysis-card">
+          <header className="analysis-card-header">
+            <strong>Categorias rurales detectadas</strong>
+          </header>
+          <div className="osm-category-grid">
+            {['landuse', 'natural', 'leisure', 'water'].map((group) => {
+              const items = Array.isArray(osmCategories?.[group]) ? osmCategories[group] : [];
+              if (items.length === 0) return null;
+              return (
+                <div key={group} className="osm-category-group">
+                  <h5>{group}</h5>
+                  <ul>
+                    {items.slice(0, 8).map((entry) => (
+                      <li key={`${group}-${entry.value}`}>
+                        {entry.value} ({entry.count})
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+        </article>
+      ) : null}
       {analysisItems.length > 0 ? (
         <div className="sidebar-analysis-list">
           <article className="sidebar-analysis-card">

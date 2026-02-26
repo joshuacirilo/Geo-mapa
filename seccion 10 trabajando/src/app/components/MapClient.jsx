@@ -32,7 +32,9 @@ export default function MapClient({ ids = {} } = {}) {
   const [analysisItems, setAnalysisItems] = useState([]);
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [osmCategories, setOsmCategories] = useState(null);
   const FIGURE_COLORS = ['#e53935', '#ff7043', '#8e24aa', '#1e88e5', '#00897b', '#7cb342', '#f9a825'];
+  const OSM_RENDER_MAX_FEATURES = 500;
   const guatemalaBounds = [
     [18.44834670293207, -88.04443359375001],
     [10.692996347925087, -92.98828125]
@@ -294,6 +296,8 @@ export default function MapClient({ ids = {} } = {}) {
     const limpiar = document.querySelector(`#${resolvedIds.clear}`);
     const sidebarEl = document.querySelector(`#${resolvedIds.sidebar}`);
     const sidebarToggle = document.querySelector(`#${resolvedIds.sidebarToggle}`);
+    const osmOverlayGroup = L.featureGroup().addTo(map);
+    const osmWaterwaysGroup = L.featureGroup().addTo(map);
 
     const isSidebarVisible = () => {
       if (sidebarControl && typeof sidebarControl.isVisible === 'function') {
@@ -380,6 +384,208 @@ export default function MapClient({ ids = {} } = {}) {
       }
 
       return payload;
+    };
+
+    const fetchOsmOverlayPolygons = async (featureCollection, zoom) => {
+      const response = await fetch('/api/osm/overlay-polygons', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        cache: 'no-store',
+        body: JSON.stringify({
+          geojson: featureCollection,
+          zoom
+        })
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error ?? 'No fue posible obtener overlay de poligonos OSM.');
+      }
+      return payload;
+    };
+
+    const fetchOsmWaterways = async (featureCollection, zoom) => {
+      const response = await fetch('/api/osm/waterways', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        cache: 'no-store',
+        body: JSON.stringify({
+          geojson: featureCollection,
+          zoom
+        })
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error ?? 'No fue posible obtener waterways OSM.');
+      }
+      return payload;
+    };
+
+    const renderOsmOverlayPolygons = (featureCollection) => {
+      osmOverlayGroup.clearLayers();
+
+      const colorByTagValue = {
+        water: {
+          pond: '#4fc3f7',
+          river: '#039be5',
+          lake: '#1e88e5',
+          stream: '#29b6f6',
+          canal: '#0288d1',
+          drain: '#26c6da'
+        },
+        natural: {
+          water: '#42a5f5',
+          wood: '#2e7d32',
+          tree_row: '#558b2f',
+          sand: '#f4d06f',
+          wetland: '#26a69a',
+          grassland: '#7cb342'
+        },
+        landuse: {
+          residential: '#9e9e9e',
+          orchard: '#66bb6a',
+          forest: '#2e7d32',
+          cemetery: '#8d6e63',
+          farmland: '#d4a017',
+          meadow: '#9ccc65',
+          farmyard: '#bc8f5a',
+          military: '#757575'
+        },
+        leisure: {
+          pitch: '#81c784',
+          nature_reserve: '#388e3c',
+          park: '#43a047',
+          garden: '#66bb6a'
+        }
+      };
+
+      const resolveCategoryColor = (props) => {
+        if (props?.water) {
+          return colorByTagValue.water?.[props.water] ?? '#29b6f6';
+        }
+        if (props?.natural) {
+          return colorByTagValue.natural?.[props.natural] ?? '#66bb6a';
+        }
+        if (props?.landuse) {
+          return colorByTagValue.landuse?.[props.landuse] ?? '#bdb76b';
+        }
+        if (props?.leisure) {
+          return colorByTagValue.leisure?.[props.leisure] ?? '#4caf50';
+        }
+        if (props?.kind === 'water') return '#42a5f5';
+        if (props?.kind === 'farmland') return '#d4a017';
+        if (props?.kind === 'green') return '#43a047';
+        return '#90a4ae';
+      };
+
+      const styleByKind = (feature) => {
+        const props = feature?.properties ?? {};
+        const fillColor = resolveCategoryColor(props);
+        return {
+          color: fillColor,
+          fillColor,
+          weight: 1.1,
+          fillOpacity: 0.24
+        };
+      };
+
+      const layer = L.geoJSON(featureCollection, {
+        style: styleByKind,
+        onEachFeature: (feature, geoLayer) => {
+          const props = feature?.properties ?? {};
+          const name = props.name ?? 'Sin nombre';
+          const kind = props.kind ?? 'unknown';
+          const details = [
+            `Tipo: ${kind}`,
+            props.landuse ? `landuse: ${props.landuse}` : null,
+            props.natural ? `natural: ${props.natural}` : null,
+            props.leisure ? `leisure: ${props.leisure}` : null,
+            props.water ? `water: ${props.water}` : null
+          ]
+            .filter(Boolean)
+            .join('<br/>');
+          geoLayer.bindPopup(`<strong>${name}</strong><br/>${details}`);
+        }
+      });
+
+      layer.addTo(osmOverlayGroup);
+    };
+
+    const renderOsmWaterways = (featureCollection) => {
+      osmWaterwaysGroup.clearLayers();
+      const layer = L.geoJSON(featureCollection, {
+        style: {
+          color: '#00acc1',
+          weight: 2,
+          opacity: 0.9
+        },
+        onEachFeature: (feature, geoLayer) => {
+          const props = feature?.properties ?? {};
+          const name = props.name ?? 'Sin nombre';
+          const waterway = props.waterway ?? 'waterway';
+          geoLayer.bindPopup(`<strong>${name}</strong><br/>Waterway: ${waterway}`);
+        }
+      });
+
+      layer.addTo(osmWaterwaysGroup);
+    };
+
+    const clampFeatureCollection = (featureCollection) => {
+      const features = Array.isArray(featureCollection?.features) ? featureCollection.features : [];
+      if (features.length <= OSM_RENDER_MAX_FEATURES) return featureCollection;
+      return {
+        ...featureCollection,
+        features: features.slice(0, OSM_RENDER_MAX_FEATURES),
+        meta: {
+          ...(featureCollection?.meta ?? {}),
+          truncated: true,
+          frontend_limited: true
+        }
+      };
+    };
+
+    const syncOsmOverlaysForSelection = async (geometries) => {
+      if (!Array.isArray(geometries) || geometries.length === 0) return;
+
+      const featureCollection = {
+        type: 'FeatureCollection',
+        features: geometries.map((geometry, index) => ({
+          type: 'Feature',
+          id: `selection-${index + 1}`,
+          properties: {},
+          geometry
+        }))
+      };
+
+      const zoom = map.getZoom();
+      const [polygonResult, waterwaysResult] = await Promise.allSettled([
+        fetchOsmOverlayPolygons(featureCollection, zoom),
+        fetchOsmWaterways(featureCollection, zoom)
+      ]);
+
+      if (polygonResult.status === 'fulfilled') {
+        const polygonOverlay = clampFeatureCollection(polygonResult.value);
+        if (polygonOverlay?.type === 'FeatureCollection') {
+          renderOsmOverlayPolygons(polygonOverlay);
+        }
+        setOsmCategories(polygonOverlay?.meta?.available_categories ?? null);
+      } else {
+        console.warn('OSM overlay-polygons warning:', polygonResult.reason);
+      }
+
+      if (waterwaysResult.status === 'fulfilled') {
+        const waterwaysOverlay = clampFeatureCollection(waterwaysResult.value);
+        if (waterwaysOverlay?.type === 'FeatureCollection') {
+          renderOsmWaterways(waterwaysOverlay);
+        }
+      } else {
+        console.warn('OSM waterways warning:', waterwaysResult.reason);
+      }
     };
 
     const circleToPolygonFeature = (circleLayer, segments = 64) => {
@@ -570,12 +776,19 @@ export default function MapClient({ ids = {} } = {}) {
         try {
           const geojson = item.toGeojson();
           const responseAnalysis = await analyzeGeometry(geojson);
+          const geometry =
+            geojson?.type === 'Feature'
+              ? geojson.geometry
+              : geojson?.type && geojson?.coordinates
+                ? geojson
+                : null;
           showSidebarAnalysis({
             figureId: item.figureId,
             color: item.color,
             shapeLabel: item.shapeLabel,
             note: item.note,
             geojson,
+            geometry,
             analysis: responseAnalysis
           });
         } catch (error) {
@@ -583,6 +796,16 @@ export default function MapClient({ ids = {} } = {}) {
             `Figura ${item.figureId}: ${error?.message ?? 'Error en analisis geoespacial.'}`
           );
         }
+      }
+
+      try {
+        const geometries = queue
+          .map((item) => item.toGeojson())
+          .map((g) => (g?.type === 'Feature' ? g.geometry : g))
+          .filter((geometry) => geometry && (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon'));
+        await syncOsmOverlaysForSelection(geometries);
+      } catch (error) {
+        console.warn('No fue posible sincronizar overlays OSM:', error);
       }
 
       return true;
@@ -753,6 +976,9 @@ export default function MapClient({ ids = {} } = {}) {
       setStatusMessage('');
       setErrorMessage('');
       setAnalysisItems([]);
+      setOsmCategories(null);
+      osmOverlayGroup.clearLayers();
+      osmWaterwaysGroup.clearLayers();
     };
 
     btn?.addEventListener('click', onCrear);
@@ -787,6 +1013,10 @@ export default function MapClient({ ids = {} } = {}) {
       }
       figuresLayerGroup.clearLayers();
       map.removeLayer(figuresLayerGroup);
+      osmOverlayGroup.clearLayers();
+      osmWaterwaysGroup.clearLayers();
+      map.removeLayer(osmOverlayGroup);
+      map.removeLayer(osmWaterwaysGroup);
       if (fixedMarker) {
         fixedMarker.remove();
       }
@@ -813,6 +1043,7 @@ export default function MapClient({ ids = {} } = {}) {
         statusMessage={statusMessage}
         errorMessage={errorMessage}
         analysisItems={analysisItems}
+        osmCategories={osmCategories}
       />
       <button id={resolvedIds.sidebarToggle} className="sidebar-toggle" type="button" />
     </>
