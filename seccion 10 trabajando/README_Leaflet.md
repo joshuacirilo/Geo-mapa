@@ -739,3 +739,146 @@ const miniMapToggleButton = L.easyButton({
 Cada minimapa tiene su handler `on('click', ...)` para ejecutar `mainBaseMap.setUrl(...)` y cambiar la capa principal al estilo seleccionado.
 
 
+
+---
+
+## Analisis geoespacial backend (PostGIS Raster)
+Esta seccion documenta la implementacion para analizar cobertura (vegetacion/construccion) a partir de figuras dibujadas en Leaflet.
+
+### Endpoint
+- Ruta: `POST /api/geo/analyze`
+- Archivo: `src/app/api/geo/analyze/route.js`
+- Runtime: `nodejs`
+
+### Que recibe el endpoint
+Acepta body en cualquiera de estos formatos GeoJSON:
+- `FeatureCollection`
+- `Feature`
+- `Geometry`
+
+El helper `extractGeometry(...)` normaliza esos formatos y extrae la geometria final.
+
+Archivo helper:
+- `src/lib/geo/extractGeometry.js`
+
+### Validaciones aplicadas
+- Rechaza si no hay geometria en el body.
+- Rechaza si el tipo no es `Polygon` o `MultiPolygon`.
+- Rechaza si las coordenadas exceden el limite (`GEO_MAX_COORDS`, default `15000`).
+- Rechaza si PostGIS detecta geometria invalida (`ST_IsValid = false`).
+
+### Calculo en PostgreSQL + PostGIS
+La consulta usa CTEs y `prisma.$queryRaw` parametrizado.
+
+Pipeline:
+1. `ST_GeomFromGeoJSON(...)`
+2. `ST_SetSRID(..., 4326)`
+3. `ST_Intersects` contra `geo_data.worldcover_gt`
+4. `ST_Clip` para recortar raster por poligono
+5. `ST_ValueCount(rast_clip, 1, true)` para contar pixeles por clase
+6. Suma de clases:
+   - Vegetacion: `10, 20, 30`
+   - Construccion: `50`
+7. Porcentajes y redondeo a 2 decimales
+8. Area total en m2 con `ST_Area(ST_Transform(geom, 3857))`
+
+### Respuesta del endpoint
+Devuelve:
+- `area_total_m2`
+- `vegetacion_pct`
+- `built_up_pct`
+- `other_pct`
+- `meta.srid` y `meta.classes_used`
+
+Ejemplo:
+
+```json
+{
+  "area_total_m2": 1171832.59,
+  "vegetacion_pct": 68.08,
+  "built_up_pct": 31.41,
+  "other_pct": 0.51,
+  "meta": {
+    "srid": 4326,
+    "classes_used": {
+      "veg": [10, 20, 30],
+      "built": [50]
+    }
+  }
+}
+```
+
+## Flujo frontend: envio de GeoJSON al backend
+Archivo principal:
+- `src/app/components/MapClient.jsx`
+
+### Cuando usuario presiona "Crear"
+- Si el modo es `polygon`:
+  - Usa `polygon.toGeoJSON()`
+  - Hace `fetch('/api/geo/analyze', { method: 'POST', body: ... })`
+- Si el modo es `circle`:
+  - Convierte el circulo a un poligono aproximado (`circleToPolygonFeature`, 64 segmentos)
+  - Envia ese `Polygon` al endpoint
+
+### Que se muestra en UI
+En el sidebar se muestra solo el resumen del analisis:
+- Area total (m2)
+- Vegetacion (%)
+- Construccion (%)
+- Otros (%)
+
+No se muestra el GeoJSON crudo en el sidebar.
+
+### Manejo de error
+- Si backend responde `400`, se muestra mensaje de validacion.
+- Si backend responde `500`, se muestra mensaje general; en desarrollo el backend incluye `detail` para diagnostico.
+
+## Notas operativas
+- Tabla raster utilizada: `geo_data.worldcover_gt` (`rid`, `rast`, `filename`).
+- Extensiones requeridas en DB: `postgis`, `postgis_raster`.
+- Esta implementacion evita modelar raster en Prisma y usa SQL raw parametrizado para PostGIS.
+
+---
+
+## Flujo final: multiples figuras y analisis por lote
+Este es el comportamiento final implementado para dibujo y analisis.
+
+### Objetivo
+- Permitir dibujar **N figuras** (poligonos y circulos) en el mapa.
+- Evitar que una figura nueva borre o modifique las anteriores.
+- Ejecutar extraccion de GeoJSON + analisis **solo al presionar `Crear`**.
+
+### Como funciona
+1. Dibujas figuras libremente en el mapa (pueden coexistir poligonos y circulos).
+2. Cada figura finalizada queda en una **cola pendiente** de analisis.
+3. El backend no se llama durante el dibujo.
+4. Al presionar `Crear`, se procesa la cola pendiente:
+   - se extrae GeoJSON de cada figura,
+   - se envia a `POST /api/geo/analyze`,
+   - se agrega una tarjeta con metrica + grafica individual en el sidebar.
+
+### Reglas por tipo de figura
+- Poligono:
+  - Se construye con clicks de vertices.
+  - Al finalizarse, queda pendiente para el lote de `Crear`.
+- Circulo:
+  - 1er click: centro.
+  - 2do click: radio final.
+  - Queda pendiente para el lote de `Crear`.
+
+### Sidebar (resultado)
+Por cada figura procesada en el lote:
+- Se crea una tarjeta individual.
+- Se muestra area total, porcentajes y pie chart.
+- Se conserva color/identidad por figura para organizar visualmente.
+
+### Limpiar
+`Limpiar` resetea:
+- borradores activos,
+- figuras acumuladas en el mapa,
+- cola pendiente,
+- resultados/graficas del sidebar.
+
+### Archivos principales de este flujo
+- `src/app/components/MapClient.jsx`
+- `src/app/components/MapSidebar.jsx`

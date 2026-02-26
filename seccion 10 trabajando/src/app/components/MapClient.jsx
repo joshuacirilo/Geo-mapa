@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet-sidebar';
 import 'leaflet-choropleth';
@@ -29,6 +29,10 @@ export default function MapClient({ ids = {} } = {}) {
   const resolvedIds = { ...DEFAULT_IDS, ...ids };
   const mapRef = useRef(null);
   const sidebarRef = useRef(null);
+  const [analysisItems, setAnalysisItems] = useState([]);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const FIGURE_COLORS = ['#e53935', '#ff7043', '#8e24aa', '#1e88e5', '#00897b', '#7cb342', '#f9a825'];
   const guatemalaBounds = [
     [18.44834670293207, -88.04443359375001],
     [10.692996347925087, -92.98828125]
@@ -341,71 +345,304 @@ export default function MapClient({ ids = {} } = {}) {
     }
     updateSidebarToggleUi();
 
-    const setSidebarHtml = (html) => {
-      if (sidebarControl && typeof sidebarControl.setContent === 'function') {
-        sidebarControl.setContent(html);
-        setSidebarVisible(true);
-        return;
-      }
-      if (sidebarEl) {
-        sidebarEl.innerHTML = html;
-        setSidebarVisible(true);
-      }
+    const showSidebarStatus = (message) => {
+      setStatusMessage(message);
+      setErrorMessage('');
+      setSidebarVisible(true);
     };
 
-    const setSidebarText = (text) => {
-      if (sidebarControl && typeof sidebarControl.setContent === 'function') {
-        sidebarControl.setContent(`<p>${text}</p>`);
-        setSidebarVisible(true);
-        return;
-      }
-      if (sidebarEl) {
-        sidebarEl.textContent = text;
-        setSidebarVisible(true);
-      }
+    const showSidebarError = (message) => {
+      setStatusMessage('');
+      setErrorMessage(message);
+      setSidebarVisible(true);
     };
 
-    let latlngs = [];
-    let polygon = null;
-    let circle = null;
-    let circleCenter = null;
-
-    const onMapClickPolygon = (e) => {
-      const punto = [e.latlng.lat, e.latlng.lng];
-      latlngs.push(punto);
-
-      if (!polygon) {
-        polygon = L.polygon(latlngs, { color: 'red' }).addTo(map);
-      } else {
-        polygon.setLatLngs(latlngs);
-      }
+    const showSidebarAnalysis = (item) => {
+      setStatusMessage('');
+      setErrorMessage('');
+      setAnalysisItems((prev) => [...prev, item]);
+      setSidebarVisible(true);
     };
 
-    const onMapClickCircle = (e) => {
-      if (!circleCenter) {
-        circleCenter = e.latlng;
+    const analyzeGeometry = async (geojsonInput) => {
+      const response = await fetch('/api/geo/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        cache: 'no-store',
+        body: JSON.stringify(geojsonInput)
+      });
 
-        if (circle) {
-          map.removeLayer(circle);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error ?? 'No fue posible analizar la geometria.');
+      }
+
+      return payload;
+    };
+
+    const circleToPolygonFeature = (circleLayer, segments = 64) => {
+      const center = circleLayer.getLatLng();
+      const radius = circleLayer.getRadius();
+      const earthRadius = 6378137;
+      const centerLat = (center.lat * Math.PI) / 180;
+      const centerLng = (center.lng * Math.PI) / 180;
+      const angularDistance = radius / earthRadius;
+      const ring = [];
+
+      for (let i = 0; i < segments; i += 1) {
+        const bearing = (2 * Math.PI * i) / segments;
+        const lat = Math.asin(
+          Math.sin(centerLat) * Math.cos(angularDistance) +
+            Math.cos(centerLat) * Math.sin(angularDistance) * Math.cos(bearing)
+        );
+        const lng =
+          centerLng +
+          Math.atan2(
+            Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(centerLat),
+            Math.cos(angularDistance) - Math.sin(centerLat) * Math.sin(lat)
+          );
+
+        ring.push([(lng * 180) / Math.PI, (lat * 180) / Math.PI]);
+      }
+
+      if (ring.length > 0) {
+        ring.push([...ring[0]]);
+      }
+
+      return {
+        type: 'Feature',
+        properties: {
+          source: 'circle',
+          radius_m: radius,
+          segments
+        },
+        geometry: {
+          type: 'Polygon',
+          coordinates: [ring]
         }
+      };
+    };
 
-        circle = L.circle([circleCenter.lat, circleCenter.lng], { radius: 0 }).addTo(map);
-        return;
+    let polygonPoints = [];
+    let activePolygonLayer = null;
+    let activeCircleLayer = null;
+    let activeCircleCenter = null;
+    let nextFigureId = 1;
+    let currentDrawMode = select?.value ?? 'polygon';
+    const finalizedLayers = [];
+    const figuresLayerGroup = L.featureGroup().addTo(map);
+    const pendingFigurePayloads = [];
+
+    const getNextFigureColor = () => FIGURE_COLORS[(nextFigureId - 1) % FIGURE_COLORS.length];
+
+    const claimFigureIdentity = (shapeLabel) => {
+      const figureId = nextFigureId;
+      const color = getNextFigureColor();
+      nextFigureId += 1;
+      return { figureId, color, shapeLabel };
+    };
+
+    const resetPolygonDraft = () => {
+      if (activePolygonLayer && map.hasLayer(activePolygonLayer)) {
+        map.removeLayer(activePolygonLayer);
       }
+      activePolygonLayer = null;
+      polygonPoints = [];
+    };
 
-      const radio = circleCenter.distanceTo(e.latlng);
-      circle.setRadius(radio);
-      circleCenter = null;
+    const resetCircleDraft = () => {
+      if (activeCircleLayer && map.hasLayer(activeCircleLayer)) {
+        map.removeLayer(activeCircleLayer);
+      }
+      activeCircleLayer = null;
+      activeCircleCenter = null;
       map.off('mousemove', onMapMoveCircle);
     };
 
-    const onMapMoveCircle = (e) => {
-      if (!circleCenter || !circle) {
+    const ensureFigureLayersPresent = () => {
+      if (!map.hasLayer(figuresLayerGroup)) {
+        figuresLayerGroup.addTo(map);
+      }
+      finalizedLayers.forEach((layer) => {
+        if (!figuresLayerGroup.hasLayer(layer)) {
+          figuresLayerGroup.addLayer(layer);
+        }
+      });
+      if (activePolygonLayer && !map.hasLayer(activePolygonLayer)) {
+        activePolygonLayer.addTo(map);
+      }
+      if (activeCircleLayer && !map.hasLayer(activeCircleLayer)) {
+        activeCircleLayer.addTo(map);
+      }
+    };
+
+    const finalizePolygonDraft = () => {
+      if (!activePolygonLayer || polygonPoints.length < 3) {
+        return false;
+      }
+
+      const identity = claimFigureIdentity('Poligono');
+      const finalPolygon = L.polygon(polygonPoints, {
+        color: identity.color,
+        fillColor: identity.color,
+        fillOpacity: 0.2
+      });
+      if (activePolygonLayer && map.hasLayer(activePolygonLayer)) {
+        map.removeLayer(activePolygonLayer);
+      }
+
+      figuresLayerGroup.addLayer(finalPolygon);
+      finalizedLayers.push(finalPolygon);
+
+      if (window.filtrarMarcadoresPorBounds) {
+        window.filtrarMarcadoresPorBounds(finalPolygon.getBounds());
+        ensureFigureLayersPresent();
+      }
+
+      activePolygonLayer = null;
+      polygonPoints = [];
+
+      pendingFigurePayloads.push({
+        figureId: identity.figureId,
+        color: identity.color,
+        shapeLabel: identity.shapeLabel,
+        note: '',
+        layer: finalPolygon,
+        toGeojson: () => finalPolygon.toGeoJSON()
+      });
+
+      return true;
+    };
+
+    const finalizeCircleDraft = () => {
+      if (!activeCircleLayer || activeCircleCenter) {
+        return false;
+      }
+
+      const identity = claimFigureIdentity('Circulo');
+      const center = activeCircleLayer.getLatLng();
+      const radius = activeCircleLayer.getRadius();
+      const finalCircle = L.circle([center.lat, center.lng], {
+        radius,
+        color: identity.color,
+        fillColor: identity.color,
+        fillOpacity: 0.2
+      });
+      if (activeCircleLayer && map.hasLayer(activeCircleLayer)) {
+        map.removeLayer(activeCircleLayer);
+      }
+
+      figuresLayerGroup.addLayer(finalCircle);
+      finalizedLayers.push(finalCircle);
+
+      if (window.filtrarMarcadoresPorBounds) {
+        window.filtrarMarcadoresPorBounds(finalCircle.getBounds());
+        ensureFigureLayersPresent();
+      }
+
+      activeCircleLayer = null;
+      activeCircleCenter = null;
+      map.off('mousemove', onMapMoveCircle);
+
+      pendingFigurePayloads.push({
+        figureId: identity.figureId,
+        color: identity.color,
+        shapeLabel: identity.shapeLabel,
+        note: 'El circulo se aproxima a poligono para analisis raster.',
+        layer: finalCircle,
+        toGeojson: () => circleToPolygonFeature(finalCircle)
+      });
+
+      return true;
+    };
+
+    const processPendingFigures = async () => {
+      if (pendingFigurePayloads.length === 0) {
+        return false;
+      }
+
+      showSidebarStatus(`Analizando ${pendingFigurePayloads.length} figura(s)...`);
+      const queue = pendingFigurePayloads.splice(0, pendingFigurePayloads.length);
+
+      for (const item of queue) {
+        try {
+          const geojson = item.toGeojson();
+          const responseAnalysis = await analyzeGeometry(geojson);
+          showSidebarAnalysis({
+            figureId: item.figureId,
+            color: item.color,
+            shapeLabel: item.shapeLabel,
+            note: item.note,
+            geojson,
+            analysis: responseAnalysis
+          });
+        } catch (error) {
+          showSidebarError(
+            `Figura ${item.figureId}: ${error?.message ?? 'Error en analisis geoespacial.'}`
+          );
+        }
+      }
+
+      return true;
+    };
+
+    const onMapClickPolygon = (e) => {
+      const punto = [e.latlng.lat, e.latlng.lng];
+      polygonPoints.push(punto);
+      const drawingColor = getNextFigureColor();
+
+      if (!activePolygonLayer) {
+        activePolygonLayer = L.polygon(polygonPoints, {
+          color: drawingColor,
+          fillColor: drawingColor,
+          fillOpacity: 0.2
+        }).addTo(map);
+      } else {
+        activePolygonLayer.setLatLngs(polygonPoints);
+      }
+    };
+
+    const onMapClickCircle = async (e) => {
+      if (!activeCircleCenter) {
+        activeCircleCenter = e.latlng;
+        const drawingColor = getNextFigureColor();
+
+        if (activeCircleLayer) {
+          map.removeLayer(activeCircleLayer);
+        }
+
+        activeCircleLayer = L.circle([activeCircleCenter.lat, activeCircleCenter.lng], {
+          radius: 0,
+          color: drawingColor,
+          fillColor: drawingColor,
+          fillOpacity: 0.2
+        }).addTo(map);
         return;
       }
 
-      const radio = circleCenter.distanceTo(e.latlng);
-      circle.setRadius(radio);
+      const radio = activeCircleCenter.distanceTo(e.latlng);
+      activeCircleLayer.setRadius(radio);
+      activeCircleCenter = null;
+      map.off('mousemove', onMapMoveCircle);
+      finalizeCircleDraft();
+    };
+
+    const onMapDoubleClickPolygon = (event) => {
+      if (event?.originalEvent) {
+        L.DomEvent.stop(event.originalEvent);
+      }
+      finalizePolygonDraft();
+    };
+
+    const onMapMoveCircle = (e) => {
+      if (!activeCircleCenter || !activeCircleLayer) {
+        return;
+      }
+
+      const radio = activeCircleCenter.distanceTo(e.latlng);
+      activeCircleLayer.setRadius(radio);
     };
 
     const onMapMouseMoveDebug = (e) => {
@@ -424,83 +661,98 @@ export default function MapClient({ ids = {} } = {}) {
     };
 
     map.on('mousemove', onMapMouseMoveDebug);
+    map.on('layerremove', (event) => {
+      if (event.layer === figuresLayerGroup) {
+        ensureFigureLayersPresent();
+      }
+    });
 
     const evaluar = () => {
       const activo = checkbox?.checked;
       const modo = select?.value;
 
+      if (modo !== currentDrawMode) {
+        if (currentDrawMode === 'polygon') {
+          if (activePolygonLayer && polygonPoints.length >= 3) {
+            finalizePolygonDraft();
+          } else {
+            resetPolygonDraft();
+          }
+        }
+        if (currentDrawMode === 'circle') {
+          if (activeCircleLayer && !activeCircleCenter) {
+            finalizeCircleDraft();
+          } else {
+            resetCircleDraft();
+          }
+        }
+        currentDrawMode = modo;
+      }
+
       map.off('click', onMapClickPolygon);
       map.off('click', onMapClickCircle);
+      map.off('dblclick', onMapDoubleClickPolygon);
       map.off('mousemove', onMapMoveCircle);
 
       if (!activo) {
+        resetPolygonDraft();
+        resetCircleDraft();
+        map.doubleClickZoom.enable();
         return;
       }
 
       if (modo === 'polygon') {
         map.on('click', onMapClickPolygon);
+        map.on('dblclick', onMapDoubleClickPolygon);
+        map.doubleClickZoom.disable();
       }
 
       if (modo === 'circle') {
         map.on('click', onMapClickCircle);
         map.on('mousemove', onMapMoveCircle);
+        map.doubleClickZoom.enable();
       }
+
+      ensureFigureLayersPresent();
     };
 
-    const onCrear = () => {
+    const onCrear = async () => {
       const value = select?.value;
+      if (value === 'polygon' && activePolygonLayer && polygonPoints.length >= 3) {
+        finalizePolygonDraft();
+      }
+      if (value === 'circle' && activeCircleLayer && !activeCircleCenter) {
+        finalizeCircleDraft();
+      }
 
-      if (value === 'polygon') {
-        if (!polygon || latlngs.length < 3) {
-          setSidebarText('Poligono incompleto: agrega al menos 3 puntos.');
-          return;
-        }
-
-        const geojson = polygon.toGeoJSON();
-        setSidebarHtml(`<pre>${JSON.stringify(geojson, null, 2)}</pre>`);
-        if (window.filtrarMarcadoresPorBounds) {
-          window.filtrarMarcadoresPorBounds(polygon.getBounds());
-        }
+      if (value !== 'polygon' && value !== 'circle') {
+        showSidebarError('Selecciona una figura para crear.');
         return;
       }
 
-      if (value === 'circle') {
-        if (!circle || circleCenter) {
-          setSidebarText('Circulo incompleto: define centro y radio con 2 clicks.');
-          return;
-        }
-
-        const geojson = circle.toGeoJSON();
-        geojson.properties = {
-          ...geojson.properties,
-          radius: circle.getRadius()
-        };
-
-        setSidebarHtml(`<pre>${JSON.stringify(geojson, null, 2)}</pre>`);
-        if (window.filtrarMarcadoresPorBounds) {
-          window.filtrarMarcadoresPorBounds(circle.getBounds());
-        }
-        return;
+      const processed = await processPendingFigures();
+      if (!processed) {
+        showSidebarError('No hay figuras listas para analizar. Termina una figura primero.');
       }
-
-      setSidebarText('Selecciona una figura para crear.');
     };
 
     const onLimpiar = () => {
-      if (polygon) {
-        map.removeLayer(polygon);
-        polygon = null;
-      }
-      if (circle) {
-        map.removeLayer(circle);
-        circle = null;
-      }
-      circleCenter = null;
-      map.off('mousemove', onMapMoveCircle);
-      latlngs = [];
+      resetPolygonDraft();
+      resetCircleDraft();
+      finalizedLayers.forEach((layer) => {
+        if (figuresLayerGroup.hasLayer(layer)) {
+          figuresLayerGroup.removeLayer(layer);
+        }
+      });
+      finalizedLayers.length = 0;
+      pendingFigurePayloads.length = 0;
+      nextFigureId = 1;
       if (window.resetFiltroMarcadores) {
         window.resetFiltroMarcadores();
       }
+      setStatusMessage('');
+      setErrorMessage('');
+      setAnalysisItems([]);
     };
 
     btn?.addEventListener('click', onCrear);
@@ -533,10 +785,14 @@ export default function MapClient({ ids = {} } = {}) {
       if (markersLayer) {
         markersLayer.remove();
       }
+      figuresLayerGroup.clearLayers();
+      map.removeLayer(figuresLayerGroup);
       if (fixedMarker) {
         fixedMarker.remove();
       }
       map.off('mousemove', onMapMouseMoveDebug);
+      map.off('dblclick', onMapDoubleClickPolygon);
+      map.doubleClickZoom.enable();
       map.off();
       map.remove();
     };
@@ -551,7 +807,13 @@ export default function MapClient({ ids = {} } = {}) {
         clearId={resolvedIds.clear}
       />
       <MapCanvas id={resolvedIds.map} ref={mapRef} />
-      <MapSidebar id={resolvedIds.sidebar} ref={sidebarRef} />
+      <MapSidebar
+        id={resolvedIds.sidebar}
+        ref={sidebarRef}
+        statusMessage={statusMessage}
+        errorMessage={errorMessage}
+        analysisItems={analysisItems}
+      />
       <button id={resolvedIds.sidebarToggle} className="sidebar-toggle" type="button" />
     </>
   );
