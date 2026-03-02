@@ -1,5 +1,5 @@
-import { Circle } from "./components/circle";
+import { MapModeSwitcher } from "./components/MapModeSwitcher";
 
 export default function HomePage() {
-  return <Circle />;
+  return <MapModeSwitcher />;
 }

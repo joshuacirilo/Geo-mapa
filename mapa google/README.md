@@ -6,11 +6,11 @@ Este proyecto usa Next.js con TypeScript y Google Maps JavaScript API.
 
 - Node.js instalado.
 - API key de Google Maps con `Maps JavaScript API` habilitada.
-- Para dibujo de circulos: incluir libreria `drawing` (ya se carga en el codigo).
+- Librerias `drawing` y `geometry` habilitadas desde la carga del script.
 
 ## Variables de entorno
 
-Configura tu key en:
+Archivo:
 
 - `.env`
 
@@ -27,43 +27,84 @@ npm install
 npm run dev
 ```
 
-## Funciones incluidas
+## Flujo principal
 
-### 1) Map Types
+### 0) Selector 2D / 3D
 
-En el panel flotante (arriba a la izquierda) puedes cambiar el tipo de mapa:
+En la esquina superior derecha tienes el switch:
 
-- `Carretera` (`roadmap`)
-- `Satelite` (`satellite`)
-- `Hibrido` (`hybrid`)
-- `Relieve` (`terrain`)
+- `2D`: editor completo (formas, filtros, medicion).
+- `3D`: vista Photorealistic 3D (`maps3d`) centrada en Ciudad de Guatemala.
 
-Esto cambia la visualizacion en tiempo real sin recargar.
+En `3D` tienes iconos para dibujar geometria 3D:
 
-### 2) Tilt & Rotation
+- `3D-L`: inicia dibujo de polyline 3D.
+- `3D-P`: inicia dibujo de polygon 3D.
+- `OK`: guarda la figura actual.
+- `X`: limpia figuras 3D.
 
-En el mismo panel tienes:
+Las figuras usan `altitudeMode: CLAMP_TO_GROUND` para ajustarse al relieve.
 
-- `Tilt 45deg` / `Quitar 45deg`
-- `Giro -45deg`
-- `Giro +45deg`
+Nota:
 
-Estas acciones usan `setTilt` y `setHeading` del mapa.
+- La vista 3D depende de soporte del navegador/GPU y cobertura disponible.
+- Si 3D no carga, se muestra mensaje en pantalla.
 
-Notas:
+### 1) Cargar marcadores desde GeoJSON
 
-- Tilt/rotacion dependen de soporte WebGL, navegador y cobertura de datos 3D.
-- En algunas zonas o configuraciones, Google puede limitar o ignorar inclinacion/rotacion.
+Edita este archivo:
 
-### 3) Dibujo de circulos
+- [app/data/geojson.ts](c:/Users/Joshua C/Desktop/aprendizaje/geo-mapas/Geo-mapa/mapa google/app/data/geojson.ts)
 
-Se mantiene el control nativo de dibujo de Google (icono en el mapa) y esta limitado solo a circulos.
+Actualmente se leen `Feature` de tipo `Point` y se crean marcadores internos.
 
-- Al crear un nuevo circulo, el anterior se elimina.
-- El circulo creado queda editable y arrastrable.
+### 2) Dibujar formas con iconos
 
-## Ubicacion y limites
+En la barra flotante del mapa tienes iconos para:
+
+- `Polyline` (linea)
+- `Polygon` (poligono)
+- `Circle` (circulo)
+- `Limpiar` (borra todas las figuras)
+- `MED` (medicion entre 2 clics)
+
+Las figuras quedan editables al terminar de dibujarlas.
+
+### 3) Filtrado espacial de marcadores
+
+Los marcadores del GeoJSON solo se renderizan si estan dentro de al menos una figura:
+
+- Circle: dentro del radio.
+- Polygon: dentro del area del poligono.
+- Polyline: sobre/pegado a la linea (tolerancia aproximada).
+
+Si no hay figuras, no se muestra ningun marcador.
+
+### 4) Medicion
+
+- `MED`: calcula distancia directa (linea recta) entre dos puntos.
+
+### 5) Tipo de mapa
+
+Se mantiene selector de vista:
+
+- `roadmap`
+- `satellite`
+- `hybrid`
+- `terrain`
+
+### 6) Contador de uso API
+
+En la parte inferior se muestra:
+
+- `map loads` acumulados (persistidos en `localStorage`)
+- gasto aproximado en USD
+
+Puedes ajustar costo por carga con:
+
+- `NEXT_PUBLIC_MAP_LOAD_COST_USD` en `.env`
+
+## Ubicacion base
 
 - Centro inicial: Ciudad de Guatemala, Zona 10.
-- Restriccion del mapa: limites aproximados de Guatemala (`strictBounds: true`).
-
+- Restriccion: limites aproximados de Guatemala (`strictBounds: true`).
