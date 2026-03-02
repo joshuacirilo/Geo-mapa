@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { mapGeoJson } from "../data/geojson";
+import { VEGETATION_LOCAL_STYLE } from "../estilos mapa/vegetacion y caminos";
+import { getIsochronePolygon } from "./iso4app";
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const MAP_LOAD_COST_USD = Number(process.env.NEXT_PUBLIC_MAP_LOAD_COST_USD ?? "0.007");
 
 type DrawMode = "circle" | "polygon" | "polyline" | null;
-type InteractionMode = "measure" | null;
+type InteractionMode = "measure" | "iso" | null;
 
 type LatLngLiteral = { lat: number; lng: number };
 
@@ -18,18 +20,6 @@ const GUATEMALA_BOUNDS = {
   west: -92.23,
   east: -88.22,
 };
-const VEGETATION_LOCAL_STYLE = [
-  { featureType: "landscape.natural", stylers: [{ color: "#2d5a27" }, { visibility: "on" }] },
-  { featureType: "landscape.natural.terrain", stylers: [{ color: "#3a6b32" }] },
-  { featureType: "poi.park", stylers: [{ color: "#4caf50" }, { visibility: "on" }] },
-  { featureType: "water", stylers: [{ color: "#17263c" }] },
-  { featureType: "road.highway", stylers: [{ color: "#4a5563" }, { weight: 4 }] },
-  { featureType: "road.arterial", stylers: [{ color: "#3f4955" }, { weight: 3 }] },
-  { featureType: "road.local", stylers: [{ color: "#38414e" }, { weight: 2 }] },
-  { featureType: "poi.business", stylers: [{ visibility: "off" }] },
-  { featureType: "poi.medical", stylers: [{ visibility: "off" }] },
-  { featureType: "poi.school", stylers: [{ visibility: "off" }] },
-];
 
 export function Circle() {
   const mapRef = useRef<HTMLDivElement | null>(null);
@@ -40,6 +30,8 @@ export function Circle() {
   const clickPointsRef = useRef<any[]>([]);
   const tempPointMarkersRef = useRef<any[]>([]);
   const measureLineRef = useRef<any>(null);
+  const isoMarkerRef = useRef<any>(null);
+  const isoPolygonRef = useRef<any>(null);
   const interactionModeRef = useRef<InteractionMode>(null);
   const [error, setError] = useState<string | null>(null);
   const [mapType, setMapType] = useState("roadmap");
@@ -48,6 +40,7 @@ export function Circle() {
   const [mapLoadCount, setMapLoadCount] = useState(0);
   const hasCountedLoadRef = useRef(false);
   const [measureResult, setMeasureResult] = useState<string>("");
+  const [isoResult, setIsoResult] = useState<string>("");
 
   const clearPointSelection = () => {
     clickPointsRef.current = [];
@@ -62,6 +55,15 @@ export function Circle() {
     }
     clearPointSelection();
     setMeasureResult("");
+    if (isoMarkerRef.current) {
+      isoMarkerRef.current.setMap(null);
+      isoMarkerRef.current = null;
+    }
+    if (isoPolygonRef.current) {
+      isoPolygonRef.current.setMap(null);
+      isoPolygonRef.current = null;
+    }
+    setIsoResult("");
   };
 
   const updateMarkersVisibility = () => {
@@ -248,6 +250,51 @@ export function Circle() {
         const mode = interactionModeRef.current;
         if (!mode || !event?.latLng) return;
 
+        if (mode === "iso") {
+          const point = event.latLng;
+
+          if (isoMarkerRef.current) {
+            isoMarkerRef.current.setMap(null);
+          }
+          if (isoPolygonRef.current) {
+            isoPolygonRef.current.setMap(null);
+            isoPolygonRef.current = null;
+          }
+
+          isoMarkerRef.current = new googleAny.maps.Marker({
+            map,
+            position: point,
+            title: "Punto ISO",
+          });
+
+          setIsoResult("Calculando isocrona...");
+
+          void (async () => {
+            try {
+              const { paths, startpoint } = await getIsochronePolygon(
+                point.lat(),
+                point.lng(),
+              );
+
+              isoPolygonRef.current = new googleAny.maps.Polygon({
+                map,
+                paths,
+                strokeColor: "#ef4444",
+                strokeOpacity: 0.9,
+                strokeWeight: 2,
+                fillColor: "#ef4444",
+                fillOpacity: 0.2,
+                clickable: false,
+              });
+
+              setIsoResult(`Isocrona creada (10km)${startpoint ? ` - ${startpoint}` : ""}`);
+            } catch (isoError: any) {
+              setIsoResult(`Error ISO: ${isoError?.message ?? "No se pudo generar isocrona."}`);
+            }
+          })();
+          return;
+        }
+
         clickPointsRef.current.push(event.latLng);
         tempPointMarkersRef.current.push(
           new googleAny.maps.Marker({
@@ -422,6 +469,17 @@ export function Circle() {
         >
           MED
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            setDrawMode(null);
+            setInteractionMode(interactionMode === "iso" ? null : "iso");
+          }}
+          title="Isocrona"
+          style={{ fontSize: 16, padding: "6px 10px" }}
+        >
+          ISO
+        </button>
         <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
           Tipo:
           <select
@@ -451,8 +509,13 @@ export function Circle() {
           maxWidth: 560,
         }}
       >
-        <div>Modo activo: {interactionMode ?? "ninguno"} (haz clic en 2 puntos)</div>
+        <div>
+          Modo activo: {interactionMode ?? "ninguno"}{" "}
+          {interactionMode === "measure" ? "(haz clic en 2 puntos)" : null}
+          {interactionMode === "iso" ? "(haz clic en 1 punto)" : null}
+        </div>
         {measureResult ? <div>{measureResult}</div> : null}
+        {isoResult ? <div>{isoResult}</div> : null}
       </div>
 
       <div

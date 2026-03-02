@@ -11,9 +11,19 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const iso4appKey =
+    process.env.NEXT_PUBLIC_ISO4APP_KEY ?? process.env.ISO4APP ?? "";
+
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__ISO4APP_KEY__=${JSON.stringify(iso4appKey)};`,
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }
