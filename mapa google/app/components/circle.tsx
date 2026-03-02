@@ -18,6 +18,18 @@ const GUATEMALA_BOUNDS = {
   west: -92.23,
   east: -88.22,
 };
+const VEGETATION_LOCAL_STYLE = [
+  { featureType: "landscape.natural", stylers: [{ color: "#2d5a27" }, { visibility: "on" }] },
+  { featureType: "landscape.natural.terrain", stylers: [{ color: "#3a6b32" }] },
+  { featureType: "poi.park", stylers: [{ color: "#4caf50" }, { visibility: "on" }] },
+  { featureType: "water", stylers: [{ color: "#17263c" }] },
+  { featureType: "road.highway", stylers: [{ color: "#4a5563" }, { weight: 4 }] },
+  { featureType: "road.arterial", stylers: [{ color: "#3f4955" }, { weight: 3 }] },
+  { featureType: "road.local", stylers: [{ color: "#38414e" }, { weight: 2 }] },
+  { featureType: "poi.business", stylers: [{ visibility: "off" }] },
+  { featureType: "poi.medical", stylers: [{ visibility: "off" }] },
+  { featureType: "poi.school", stylers: [{ visibility: "off" }] },
+];
 
 export function Circle() {
   const mapRef = useRef<HTMLDivElement | null>(null);
@@ -309,6 +321,15 @@ export function Circle() {
 
   useEffect(() => {
     if (!mapInstanceRef.current) return;
+    if (mapType === "vegetacion") {
+      mapInstanceRef.current.setMapTypeId("roadmap");
+      mapInstanceRef.current.setOptions({
+        styles: VEGETATION_LOCAL_STYLE,
+      });
+      return;
+    }
+
+    mapInstanceRef.current.setOptions({ styles: null });
     mapInstanceRef.current.setMapTypeId(mapType);
   }, [mapType]);
 
@@ -411,6 +432,7 @@ export function Circle() {
             <option value="satellite">Satelite</option>
             <option value="hybrid">Hibrido</option>
             <option value="terrain">Relieve</option>
+            <option value="vegetacion">Vegetacion</option>
           </select>
         </label>
       </div>

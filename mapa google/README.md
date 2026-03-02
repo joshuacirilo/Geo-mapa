@@ -45,6 +45,10 @@ En `3D` tienes iconos para dibujar geometria 3D:
 
 Las figuras usan `altitudeMode: CLAMP_TO_GROUND` para ajustarse al relieve.
 
+TODO:
+
+- `3D-P` (polygon 3D) queda pendiente de estabilizar. Actualmente puede no renderizar en algunos entornos.
+
 Nota:
 
 - La vista 3D depende de soporte del navegador/GPU y cobertura disponible.

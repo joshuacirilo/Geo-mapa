@@ -7,6 +7,9 @@ const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const CENTER_ZONE_10 = { lat: 14.5887, lng: -90.5054, altitude: 220 };
 type Draw3DMode = "polyline" | "polygon" | null;
 
+// TODO(3d-polygon): El modo 3D-P aun no renderiza de forma consistente en todos los entornos.
+// Retomar con fallback a Polygon3DInteractiveElement y validar compatibilidad por navegador/API.
+
 function normalizePoint(event: any): { lat: number; lng: number; altitude: number } | null {
   const candidate =
     event?.latLngAltitude ??
@@ -72,7 +75,7 @@ export function Map3DView() {
     const shape =
       mode === "polygon"
         ? new Polygon3DElement({
-            coordinates: points,
+            path: points,
             altitudeMode: "CLAMP_TO_GROUND",
             fillColor: "#16a34a",
             fillOpacity: 0.35,
@@ -81,7 +84,7 @@ export function Map3DView() {
             drawsOccludedSegments: false,
           })
         : new Polyline3DElement({
-            coordinates: points,
+            path: points,
             altitudeMode: "CLAMP_TO_GROUND",
             strokeColor: "#ea580c",
             strokeWidth: 4,
@@ -112,7 +115,7 @@ export function Map3DView() {
     previewOverlayRef.current =
       mode === "polygon"
         ? new Polygon3DElement({
-            coordinates: points,
+            path: points,
             altitudeMode: "CLAMP_TO_GROUND",
             fillColor: "#0ea5e9",
             fillOpacity: 0.25,
@@ -121,7 +124,7 @@ export function Map3DView() {
             drawsOccludedSegments: false,
           })
         : new Polyline3DElement({
-            coordinates: points,
+            path: points,
             altitudeMode: "CLAMP_TO_GROUND",
             strokeColor: "#0284c7",
             strokeWidth: 3,
