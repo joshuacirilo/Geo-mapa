@@ -1,9 +1,9 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useRef, useState } from "react";
 import { mapGeoJson } from "../data/geojson";
 import { VEGETATION_LOCAL_STYLE } from "../estilos mapa/vegetacion y caminos";
-import { getIsochronePolygon } from "./iso4app";
+import { getIsocroneFromMapbox, type MapboxProfile } from "./isocrone";
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const MAP_LOAD_COST_USD = Number(process.env.NEXT_PUBLIC_MAP_LOAD_COST_USD ?? "0.007");
@@ -33,6 +33,7 @@ export function Circle() {
   const isoMarkerRef = useRef<any>(null);
   const isoPolygonRef = useRef<any>(null);
   const interactionModeRef = useRef<InteractionMode>(null);
+  const pickingIsoPointRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [mapType, setMapType] = useState("roadmap");
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
@@ -41,6 +42,11 @@ export function Circle() {
   const hasCountedLoadRef = useRef(false);
   const [measureResult, setMeasureResult] = useState<string>("");
   const [isoResult, setIsoResult] = useState<string>("");
+  const [isoProfile, setIsoProfile] = useState<MapboxProfile | "">("");
+  const [isoMinutes, setIsoMinutes] = useState(10);
+  const [isoLatitude, setIsoLatitude] = useState<number>(CENTER_ZONE_10.lat);
+  const [isoLongitude, setIsoLongitude] = useState<number>(CENTER_ZONE_10.lng);
+  const [isPickingIsoPoint, setIsPickingIsoPoint] = useState(false);
 
   const clearPointSelection = () => {
     clickPointsRef.current = [];
@@ -64,6 +70,63 @@ export function Circle() {
       isoPolygonRef.current = null;
     }
     setIsoResult("");
+  };
+
+  const createIsochrone = async () => {
+    const googleAny = (window as any).google;
+    const map = mapInstanceRef.current;
+    if (!googleAny || !map) return;
+
+    if (!isoProfile) {
+      setIsoResult("Selecciona un profile ISO.");
+      return;
+    }
+    if (!Number.isFinite(isoLatitude) || !Number.isFinite(isoLongitude)) {
+      setIsoResult("Latitud/Longitud no validas.");
+      return;
+    }
+
+    if (isoMarkerRef.current) {
+      isoMarkerRef.current.setMap(null);
+    }
+    if (isoPolygonRef.current) {
+      isoPolygonRef.current.setMap(null);
+      isoPolygonRef.current = null;
+    }
+
+    isoMarkerRef.current = new googleAny.maps.Marker({
+      map,
+      position: { lat: isoLatitude, lng: isoLongitude },
+      title: "Punto ISO",
+    });
+
+    setIsoResult("Calculando isocrona...");
+
+    try {
+      const iso = await getIsocroneFromMapbox(isoLatitude, isoLongitude, {
+        profile: isoProfile,
+        minutes: isoMinutes,
+        visualization: "polygon",
+      });
+
+      console.log("ISO API RESULT:", iso.raw);
+
+      isoPolygonRef.current = new googleAny.maps.Polygon({
+        map,
+        paths: iso.polygonPaths,
+        strokeColor: "#ef4444",
+        strokeOpacity: 0.95,
+        strokeWeight: 2,
+        fillColor: "#ef4444",
+        fillOpacity: 0.2,
+        clickable: false,
+      });
+
+      map.panTo({ lat: isoLatitude, lng: isoLongitude });
+      setIsoResult(`Isocrona creada (${iso.minutes} min, ${iso.profile}).`);
+    } catch (isoError: any) {
+      setIsoResult(`Error ISO: ${isoError?.message ?? "No se pudo generar isocrona."}`);
+    }
   };
 
   const updateMarkersVisibility = () => {
@@ -96,11 +159,7 @@ export function Circle() {
 
         if (shape instanceof googleAny.maps.Polyline) {
           // 0.001 deg ~ 100m de tolerancia para considerar "sobre la ruta".
-          return googleAny.maps.geometry.poly.isLocationOnEdge(
-            position,
-            shape,
-            0.001,
-          );
+          return googleAny.maps.geometry.poly.isLocationOnEdge(position, shape, 0.001);
         }
 
         return false;
@@ -223,6 +282,26 @@ export function Circle() {
       drawingManager.setMap(map);
       drawingManagerRef.current = drawingManager;
 
+      const drawMeasurement = (origin: any, destination: any) => {
+        if (!origin || !destination) return;
+        if (measureLineRef.current) {
+          measureLineRef.current.setMap(null);
+        }
+
+        measureLineRef.current = new googleAny.maps.Polyline({
+          map,
+          path: [origin, destination],
+          strokeColor: "#111827",
+          strokeWeight: 3,
+          strokeOpacity: 0.9,
+        });
+
+        const meters = googleAny.maps.geometry.spherical.computeDistanceBetween(origin, destination);
+        setMeasureResult(
+          `Medicion directa: ${(meters / 1000).toFixed(2)} km (${Math.round(meters)} m)`,
+        );
+      };
+
       const features = (mapGeoJson as any)?.features ?? [];
       markersRef.current = features
         .filter((feature: any) => feature?.geometry?.type === "Point")
@@ -248,50 +327,24 @@ export function Circle() {
 
       googleAny.maps.event.addListener(map, "click", (event: any) => {
         const mode = interactionModeRef.current;
-        if (!mode || !event?.latLng) return;
+        if (!event?.latLng) return;
+
+        if (pickingIsoPointRef.current) {
+          const point = event.latLng;
+          const lat = point.lat();
+          const lng = point.lng();
+          setIsoLatitude(lat);
+          setIsoLongitude(lng);
+          setIsPickingIsoPoint(false);
+          setIsoResult(`Coordenadas seleccionadas: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+          console.log(`Latitud: ${lat}, Longitud: ${lng}`);
+          return;
+        }
+
+        if (!mode) return;
 
         if (mode === "iso") {
-          const point = event.latLng;
-
-          if (isoMarkerRef.current) {
-            isoMarkerRef.current.setMap(null);
-          }
-          if (isoPolygonRef.current) {
-            isoPolygonRef.current.setMap(null);
-            isoPolygonRef.current = null;
-          }
-
-          isoMarkerRef.current = new googleAny.maps.Marker({
-            map,
-            position: point,
-            title: "Punto ISO",
-          });
-
-          setIsoResult("Calculando isocrona...");
-
-          void (async () => {
-            try {
-              const { paths, startpoint } = await getIsochronePolygon(
-                point.lat(),
-                point.lng(),
-              );
-
-              isoPolygonRef.current = new googleAny.maps.Polygon({
-                map,
-                paths,
-                strokeColor: "#ef4444",
-                strokeOpacity: 0.9,
-                strokeWeight: 2,
-                fillColor: "#ef4444",
-                fillOpacity: 0.2,
-                clickable: false,
-              });
-
-              setIsoResult(`Isocrona creada (10km)${startpoint ? ` - ${startpoint}` : ""}`);
-            } catch (isoError: any) {
-              setIsoResult(`Error ISO: ${isoError?.message ?? "No se pudo generar isocrona."}`);
-            }
-          })();
+          setIsoResult("Configura parametros y presiona Crear.");
           return;
         }
 
@@ -315,27 +368,7 @@ export function Circle() {
 
         const [origin, destination] = clickPointsRef.current;
 
-        if (mode === "measure") {
-          if (measureLineRef.current) {
-            measureLineRef.current.setMap(null);
-          }
-
-          measureLineRef.current = new googleAny.maps.Polyline({
-            map,
-            path: [origin, destination],
-            strokeColor: "#111827",
-            strokeWeight: 3,
-            strokeOpacity: 0.9,
-          });
-
-          const meters = googleAny.maps.geometry.spherical.computeDistanceBetween(
-            origin,
-            destination,
-          );
-          setMeasureResult(
-            `Medicion directa: ${(meters / 1000).toFixed(2)} km (${Math.round(meters)} m)`,
-          );
-        }
+        if (mode === "measure") drawMeasurement(origin, destination);
 
         clearPointSelection();
       });
@@ -383,6 +416,10 @@ export function Circle() {
   useEffect(() => {
     interactionModeRef.current = interactionMode;
   }, [interactionMode]);
+
+  useEffect(() => {
+    pickingIsoPointRef.current = isPickingIsoPoint;
+  }, [isPickingIsoPoint]);
 
   useEffect(() => {
     if (!drawingManagerRef.current) return;
@@ -474,6 +511,8 @@ export function Circle() {
           onClick={() => {
             setDrawMode(null);
             setInteractionMode(interactionMode === "iso" ? null : "iso");
+            setIsPickingIsoPoint(false);
+            setIsoResult("");
           }}
           title="Isocrona"
           style={{ fontSize: 16, padding: "6px 10px" }}
@@ -482,10 +521,7 @@ export function Circle() {
         </button>
         <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
           Tipo:
-          <select
-            value={mapType}
-            onChange={(event) => setMapType(event.target.value)}
-          >
+          <select value={mapType} onChange={(event) => setMapType(event.target.value)}>
             <option value="roadmap">Carretera</option>
             <option value="satellite">Satelite</option>
             <option value="hybrid">Hibrido</option>
@@ -494,6 +530,110 @@ export function Circle() {
           </select>
         </label>
       </div>
+
+      {interactionMode === "iso" ? (
+        <aside className="absolute left-4 top-20 z-10 w-[340px] max-h-[calc(100vh-120px)] overflow-y-auto rounded-xl border border-slate-300 bg-slate-100/95 p-4 shadow-lg backdrop-blur-sm">
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1 text-sm text-slate-800">
+              <span className="font-medium">longitud</span>
+              <input
+                type="number"
+                step="0.000001"
+                value={isoLongitude}
+                onChange={(event) => setIsoLongitude(Number(event.target.value))}
+                className="w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-600"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm text-slate-800">
+              <span className="font-medium">latitude</span>
+              <input
+                type="number"
+                step="0.000001"
+                value={isoLatitude}
+                onChange={(event) => setIsoLatitude(Number(event.target.value))}
+                className="w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-600"
+              />
+            </label>
+          </div>
+
+          <div className="mt-4">
+            <p className="text-sm font-semibold text-slate-900">routing profile</p>
+            <div className="mt-2 space-y-2">
+              {[
+                { value: "driving", label: "driving" },
+                { value: "driving-traffic", label: "driving-traffic" },
+                { value: "walking", label: "walking" },
+                { value: "cycling", label: "cycling" },
+              ].map((option) => (
+                <label key={option.value} className="flex items-center gap-2 text-sm text-slate-800">
+                  <input
+                    type="radio"
+                    name="iso-profile"
+                    value={option.value}
+                    checked={isoProfile === option.value}
+                    onChange={(event) => setIsoProfile(event.target.value as MapboxProfile)}
+                    className="h-5 w-5 accent-slate-500"
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <p className="text-sm font-semibold text-slate-900">contour type</p>
+            <div className="mt-2 inline-flex rounded-full border border-slate-400 bg-slate-200 p-1 text-sm">
+              <span className="rounded-full bg-slate-500 px-4 py-1 text-white">minutes</span>
+              <span className="px-4 py-1 text-slate-600">meters</span>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <label className="flex flex-col gap-1 text-sm text-slate-800">
+              <span className="font-semibold text-slate-900">contour</span>
+              <span className="text-slate-500">for each isochrone</span>
+              <input
+                type="number"
+                min={1}
+                max={60}
+                value={isoMinutes}
+                onChange={(event) => setIsoMinutes(Number(event.target.value) || 10)}
+                className="mt-1 w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-600"
+              />
+            </label>
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const next = !isPickingIsoPoint;
+                setIsPickingIsoPoint(next);
+                setIsoResult(
+                  next
+                    ? "Haz clic en el mapa para tomar latitud y longitud."
+                    : "Captura de coordenadas desactivada.",
+                );
+              }}
+              title="Marcar coordenadas desde el mapa"
+              className="rounded-md border border-slate-500 bg-white px-3 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
+            >
+              {isPickingIsoPoint ? "Cancelar marcado" : "Marcar en el mapa"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void createIsochrone();
+              }}
+              title="Crear isocrona"
+              className="rounded-md border border-blue-700 bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            >
+              Crear
+            </button>
+          </div>
+        </aside>
+      ) : null}
 
       <div
         style={{
@@ -512,7 +652,11 @@ export function Circle() {
         <div>
           Modo activo: {interactionMode ?? "ninguno"}{" "}
           {interactionMode === "measure" ? "(haz clic en 2 puntos)" : null}
-          {interactionMode === "iso" ? "(haz clic en 1 punto)" : null}
+          {interactionMode === "iso"
+            ? isoProfile
+              ? `(profile: ${isoProfile}) configura parametros y presiona Crear`
+              : "(selecciona profile, parametros y presiona Crear)"
+            : null}
         </div>
         {measureResult ? <div>{measureResult}</div> : null}
         {isoResult ? <div>{isoResult}</div> : null}
@@ -535,8 +679,7 @@ export function Circle() {
         }}
       >
         <span>
-          Uso API (map loads): <strong>{mapLoadCount}</strong> | Gasto aprox:{" "}
-          <strong>USD {estimatedCost}</strong>
+          Uso API (map loads): <strong>{mapLoadCount}</strong> | Gasto aprox: <strong>USD {estimatedCost}</strong>
         </span>
         <button
           type="button"
