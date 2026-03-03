@@ -4,12 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import { mapGeoJson } from "../data/geojson";
 import { VEGETATION_LOCAL_STYLE } from "../estilos mapa/vegetacion y caminos";
 import { getIsocroneFromMapbox, type MapboxProfile } from "./isocrone";
+import { getGoogleMapsScriptSrc } from "../library/googleMapsScript";
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const MAP_LOAD_COST_USD = Number(process.env.NEXT_PUBLIC_MAP_LOAD_COST_USD ?? "0.007");
 
 type DrawMode = "circle" | "polygon" | "polyline" | null;
 type InteractionMode = "measure" | "iso" | null;
+type IsoContourSelection = "10" | "20" | "30" | "40" | "50" | "interval-15";
+type IsoMetersSelection = "1000" | "5000" | "20000" | "interval-10000";
+type IsoContourUnit = "minutes" | "meters";
 
 type LatLngLiteral = { lat: number; lng: number };
 
@@ -21,6 +25,37 @@ const GUATEMALA_BOUNDS = {
   east: -88.22,
 };
 
+function toLatLngPathsFromGeometry(geometry: any): LatLngLiteral[][] {
+  if (!geometry?.type || !geometry?.coordinates) return [];
+
+  const mapRingToPath = (ring: any): LatLngLiteral[] =>
+    Array.isArray(ring)
+      ? ring
+          .map((pair: any) => {
+            if (!Array.isArray(pair) || pair.length < 2) return null;
+            const lng = Number(pair[0]);
+            const lat = Number(pair[1]);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+            return { lat, lng };
+          })
+          .filter(Boolean) as LatLngLiteral[]
+      : [];
+
+  if (geometry.type === "Polygon") {
+    const outerRing = geometry.coordinates[0];
+    const path = mapRingToPath(outerRing);
+    return path.length >= 3 ? [path] : [];
+  }
+
+  if (geometry.type === "MultiPolygon") {
+    return geometry.coordinates
+      .map((polygon: any) => mapRingToPath(polygon?.[0]))
+      .filter((path: LatLngLiteral[]) => path.length >= 3);
+  }
+
+  return [];
+}
+
 export function Circle() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<any>(null);
@@ -31,7 +66,7 @@ export function Circle() {
   const tempPointMarkersRef = useRef<any[]>([]);
   const measureLineRef = useRef<any>(null);
   const isoMarkerRef = useRef<any>(null);
-  const isoPolygonRef = useRef<any>(null);
+  const isoPolygonsRef = useRef<any[]>([]);
   const interactionModeRef = useRef<InteractionMode>(null);
   const pickingIsoPointRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +79,10 @@ export function Circle() {
   const [isoResult, setIsoResult] = useState<string>("");
   const [isoProfile, setIsoProfile] = useState<MapboxProfile | "">("");
   const [isoMinutes, setIsoMinutes] = useState(10);
+  const [isoContourSelection, setIsoContourSelection] = useState<IsoContourSelection>("10");
+  const [isoMeters, setIsoMeters] = useState(1000);
+  const [isoMetersSelection, setIsoMetersSelection] = useState<IsoMetersSelection>("1000");
+  const [isoContourUnit, setIsoContourUnit] = useState<IsoContourUnit>("minutes");
   const [isoLatitude, setIsoLatitude] = useState<number>(CENTER_ZONE_10.lat);
   const [isoLongitude, setIsoLongitude] = useState<number>(CENTER_ZONE_10.lng);
   const [isPickingIsoPoint, setIsPickingIsoPoint] = useState(false);
@@ -65,10 +104,8 @@ export function Circle() {
       isoMarkerRef.current.setMap(null);
       isoMarkerRef.current = null;
     }
-    if (isoPolygonRef.current) {
-      isoPolygonRef.current.setMap(null);
-      isoPolygonRef.current = null;
-    }
+    isoPolygonsRef.current.forEach((polygon) => polygon.setMap(null));
+    isoPolygonsRef.current = [];
     setIsoResult("");
   };
 
@@ -89,10 +126,8 @@ export function Circle() {
     if (isoMarkerRef.current) {
       isoMarkerRef.current.setMap(null);
     }
-    if (isoPolygonRef.current) {
-      isoPolygonRef.current.setMap(null);
-      isoPolygonRef.current = null;
-    }
+    isoPolygonsRef.current.forEach((polygon) => polygon.setMap(null));
+    isoPolygonsRef.current = [];
 
     isoMarkerRef.current = new googleAny.maps.Marker({
       map,
@@ -103,27 +138,68 @@ export function Circle() {
     setIsoResult("Calculando isocrona...");
 
     try {
+      const contourMinutes =
+        isoContourSelection === "interval-15" ? [15, 30, 45, 60] : isoMinutes;
+      const contourMeters =
+        isoMetersSelection === "interval-10000" ? [10000, 20000, 30000, 40000] : isoMeters;
+
       const iso = await getIsocroneFromMapbox(isoLatitude, isoLongitude, {
         profile: isoProfile,
-        minutes: isoMinutes,
+        minutes: isoContourUnit === "minutes" ? contourMinutes : undefined,
+        meters: isoContourUnit === "meters" ? contourMeters : undefined,
         visualization: "polygon",
       });
 
       console.log("ISO API RESULT:", iso.raw);
 
-      isoPolygonRef.current = new googleAny.maps.Polygon({
-        map,
-        paths: iso.polygonPaths,
-        strokeColor: "#ef4444",
-        strokeOpacity: 0.95,
-        strokeWeight: 2,
-        fillColor: "#ef4444",
-        fillOpacity: 0.2,
-        clickable: false,
+      const features = Array.isArray(iso.features) ? iso.features : [];
+      const polygonsToRender: any[] = [];
+      const bounds = new googleAny.maps.LatLngBounds();
+      const sortedFeatures = [...features].sort((a: any, b: any) => {
+        const aContour = Number(a?.properties?.contour ?? 0);
+        const bContour = Number(b?.properties?.contour ?? 0);
+        return bContour - aContour;
       });
 
-      map.panTo({ lat: isoLatitude, lng: isoLongitude });
-      setIsoResult(`Isocrona creada (${iso.minutes} min, ${iso.profile}).`);
+      sortedFeatures.forEach((feature: any, index: number) => {
+        const paths = toLatLngPathsFromGeometry(feature?.geometry);
+        if (!paths.length) return;
+
+        const fillColor = String(
+          feature?.properties?.fillColor ?? feature?.properties?.fill ?? "#ef4444",
+        );
+        const strokeColor = fillColor;
+        const fillOpacity = Number(
+          feature?.properties?.["fill-opacity"] ?? feature?.properties?.fillOpacity ?? 0.18,
+        );
+        paths.forEach((path) => {
+          path.forEach((point) => bounds.extend(point));
+
+          const polygon = new googleAny.maps.Polygon({
+            map,
+            paths: path,
+            strokeColor,
+            strokeOpacity: 1,
+            strokeWeight: 2,
+            fillColor,
+            fillOpacity: Number.isFinite(fillOpacity) ? fillOpacity : 0.18,
+            clickable: false,
+          });
+          polygonsToRender.push(polygon);
+        });
+      });
+
+      isoPolygonsRef.current = polygonsToRender;
+
+      if (!bounds.isEmpty()) {
+        map.fitBounds(bounds, 40);
+      } else {
+        map.panTo({ lat: isoLatitude, lng: isoLongitude });
+      }
+      updateMarkersVisibility();
+      const contourLabel = Array.isArray(iso.contours) ? iso.contours.join(", ") : String(iso.contours);
+      const contourUnitLabel = iso.contourParam === "contours_meters" ? "m" : "min";
+      setIsoResult(`Isocrona creada (${contourLabel} ${contourUnitLabel}, ${iso.profile}).`);
     } catch (isoError: any) {
       setIsoResult(`Error ISO: ${isoError?.message ?? "No se pudo generar isocrona."}`);
     }
@@ -132,14 +208,20 @@ export function Circle() {
   const updateMarkersVisibility = () => {
     const googleAny = (window as any).google;
     const shapes = shapesRef.current;
+    const isoPolygons = isoPolygonsRef.current;
 
     if (!googleAny || !mapInstanceRef.current) return;
+    const hasAnyActiveFilter = shapes.length > 0 || isoPolygons.length > 0;
 
     markersRef.current.forEach((marker: any) => {
       const position = marker.getPosition();
       if (!position) return;
+      if (!hasAnyActiveFilter) {
+        marker.setMap(null);
+        return;
+      }
 
-      const isVisible = shapes.some((shape) => {
+      const isVisibleInShapes = shapes.some((shape) => {
         if (!shape) return false;
 
         if (shape instanceof googleAny.maps.Circle) {
@@ -165,7 +247,11 @@ export function Circle() {
         return false;
       });
 
-      marker.setMap(isVisible ? mapInstanceRef.current : null);
+      const isVisibleInIso = isoPolygons.some((polygon) =>
+        googleAny.maps.geometry.poly.containsLocation(position, polygon),
+      );
+
+      marker.setMap(isVisibleInShapes || isVisibleInIso ? mapInstanceRef.current : null);
     });
   };
 
@@ -385,7 +471,7 @@ export function Circle() {
     }
 
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=drawing,geometry&v=beta`;
+    script.src = getGoogleMapsScriptSrc(GOOGLE_MAPS_API_KEY, ["drawing", "geometry"]);
     script.async = true;
     script.defer = true;
     script.dataset.googleMaps = "true";
@@ -445,6 +531,8 @@ export function Circle() {
   }
 
   const estimatedCost = (mapLoadCount * MAP_LOAD_COST_USD).toFixed(4);
+  const contourMinuteOptions = [10, 20, 30, 40, 50];
+  const contourMeterOptions = [1000, 5000, 20000];
 
   return (
     <section style={{ position: "relative", width: "100%", height: "100vh" }}>
@@ -532,48 +620,72 @@ export function Circle() {
       </div>
 
       {interactionMode === "iso" ? (
-        <aside className="absolute left-4 top-20 z-10 w-[340px] max-h-[calc(100vh-120px)] overflow-y-auto rounded-xl border border-slate-300 bg-slate-100/95 p-4 shadow-lg backdrop-blur-sm">
-          <div className="grid grid-cols-2 gap-3">
+        <aside
+          className="absolute right-4 top-20 z-20 w-[340px] max-h-[calc(100vh-104px)] overflow-y-auto rounded-2xl border border-slate-300 bg-white/95 p-4 shadow-2xl backdrop-blur-sm"
+          style={{ position: "absolute", right: 16, top: 80 }}
+        >
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-slate-900">Isocrona</h3>
+              <p className="text-xs text-slate-500">Configura parametros y crea el poligono.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setInteractionMode(null);
+                setIsPickingIsoPoint(false);
+              }}
+              className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              title="Cerrar panel ISO"
+            >
+              Cerrar
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-sm text-slate-800">
-              <span className="font-medium">longitud</span>
+              <span className="font-medium">Longitud</span>
               <input
                 type="number"
                 step="0.000001"
                 value={isoLongitude}
                 onChange={(event) => setIsoLongitude(Number(event.target.value))}
-                className="w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-600"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
             </label>
 
             <label className="flex flex-col gap-1 text-sm text-slate-800">
-              <span className="font-medium">latitude</span>
+              <span className="font-medium">Latitud</span>
               <input
                 type="number"
                 step="0.000001"
                 value={isoLatitude}
                 onChange={(event) => setIsoLatitude(Number(event.target.value))}
-                className="w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-600"
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
             </label>
           </div>
 
           <div className="mt-4">
-            <p className="text-sm font-semibold text-slate-900">routing profile</p>
-            <div className="mt-2 space-y-2">
+            <p className="text-sm font-semibold text-slate-900">Routing profile</p>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
               {[
                 { value: "driving", label: "driving" },
                 { value: "driving-traffic", label: "driving-traffic" },
                 { value: "walking", label: "walking" },
                 { value: "cycling", label: "cycling" },
               ].map((option) => (
-                <label key={option.value} className="flex items-center gap-2 text-sm text-slate-800">
+                <label
+                  key={option.value}
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm text-slate-800"
+                >
                   <input
                     type="radio"
                     name="iso-profile"
                     value={option.value}
                     checked={isoProfile === option.value}
                     onChange={(event) => setIsoProfile(event.target.value as MapboxProfile)}
-                    className="h-5 w-5 accent-slate-500"
+                    className="h-4 w-4 accent-blue-600"
                   />
                   <span>{option.label}</span>
                 </label>
@@ -582,27 +694,86 @@ export function Circle() {
           </div>
 
           <div className="mt-4">
-            <p className="text-sm font-semibold text-slate-900">contour type</p>
-            <div className="mt-2 inline-flex rounded-full border border-slate-400 bg-slate-200 p-1 text-sm">
-              <span className="rounded-full bg-slate-500 px-4 py-1 text-white">minutes</span>
-              <span className="px-4 py-1 text-slate-600">meters</span>
+            <p className="text-sm font-semibold text-slate-900">Contour type</p>
+            <div className="mt-2 inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setIsoContourUnit("minutes")}
+                className={`rounded-md px-3 py-1 text-sm ${
+                  isoContourUnit === "minutes"
+                    ? "bg-blue-600 font-medium text-white"
+                    : "text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                Minutos
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsoContourUnit("meters")}
+                className={`rounded-md px-3 py-1 text-sm ${
+                  isoContourUnit === "meters"
+                    ? "bg-blue-600 font-medium text-white"
+                    : "text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                Metros
+              </button>
             </div>
+
+            {isoContourUnit === "minutes" ? (
+              <select
+                value={isoContourSelection}
+                onChange={(event) => {
+                  const nextValue = event.target.value as IsoContourSelection;
+                  setIsoContourSelection(nextValue);
+
+                  if (nextValue !== "interval-15") {
+                    const nextMinutes = Number(nextValue);
+                    if (Number.isFinite(nextMinutes)) {
+                      setIsoMinutes(nextMinutes);
+                    }
+                  }
+                }}
+                className="mt-2 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              >
+                {contourMinuteOptions.map((minutes) => (
+                  <option key={minutes} value={minutes} className="rounded px-2 py-1">
+                    {minutes} min
+                  </option>
+                ))}
+                <option value="interval-15" className="rounded px-2 py-1">
+                  Intervalos de 15 min (15, 30, 45, 60)
+                </option>
+              </select>
+            ) : (
+              <select
+                value={isoMetersSelection}
+                onChange={(event) => {
+                  const nextValue = event.target.value as IsoMetersSelection;
+                  setIsoMetersSelection(nextValue);
+
+                  if (nextValue !== "interval-10000") {
+                    const nextMeters = Number(nextValue);
+                    if (Number.isFinite(nextMeters)) {
+                      setIsoMeters(nextMeters);
+                    }
+                  }
+                }}
+                className="mt-2 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              >
+                {contourMeterOptions.map((meters) => (
+                  <option key={meters} value={meters} className="rounded px-2 py-1">
+                    {meters} m
+                  </option>
+                ))}
+                <option value="interval-10000" className="rounded px-2 py-1">
+                  Intervalo de 10000 (10000, 20000, 30000, 40000)
+                </option>
+              </select>
+            )}
           </div>
 
-          <div className="mt-4">
-            <label className="flex flex-col gap-1 text-sm text-slate-800">
-              <span className="font-semibold text-slate-900">contour</span>
-              <span className="text-slate-500">for each isochrone</span>
-              <input
-                type="number"
-                min={1}
-                max={60}
-                value={isoMinutes}
-                onChange={(event) => setIsoMinutes(Number(event.target.value) || 10)}
-                className="mt-1 w-full rounded-md border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-600"
-              />
-            </label>
-          </div>
+
 
           <div className="mt-5 flex flex-wrap gap-2">
             <button
@@ -617,7 +788,7 @@ export function Circle() {
                 );
               }}
               title="Marcar coordenadas desde el mapa"
-              className="rounded-md border border-slate-500 bg-white px-3 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 hover:bg-slate-100"
             >
               {isPickingIsoPoint ? "Cancelar marcado" : "Marcar en el mapa"}
             </button>

@@ -4,7 +4,8 @@ export type MapboxProfile = "driving" | "driving-traffic" | "walking" | "cycling
 
 type IsochroneOptions = {
   profile?: MapboxProfile;
-  minutes?: number;
+  minutes?: number | number[];
+  meters?: number | number[];
   visualization?: "polygon" | "street_network";
 };
 
@@ -13,7 +14,8 @@ type LatLngLiteral = { lat: number; lng: number };
 type IsochroneResult = {
   source: "mapbox";
   profile: MapboxProfile;
-  minutes: number;
+  contours: number | number[];
+  contourParam: "contours_minutes" | "contours_meters";
   visualization: "polygon" | "street_network";
   features: any[];
   polygonPaths: LatLngLiteral[];
@@ -28,10 +30,23 @@ function getMapboxToken(): string {
   return String(token).trim();
 }
 
-function normalizeMinutes(value: number | undefined): number {
-  const parsed = Number(value ?? 10);
-  if (!Number.isFinite(parsed)) return 10;
-  return Math.min(60, Math.max(1, Math.round(parsed)));
+function normalizeContours(
+  value: number | number[] | undefined,
+  min: number,
+  max: number,
+  fallback: number,
+): number | number[] {
+  if (Array.isArray(value)) {
+    const normalizedList = value
+      .map((entry) => Number(entry))
+      .filter((entry) => Number.isFinite(entry))
+      .map((entry) => Math.min(max, Math.max(min, Math.round(entry))));
+    return normalizedList.length ? normalizedList : [fallback];
+  }
+
+  const parsed = Number(value ?? fallback);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
 }
 
 function toLatLngPathFromPolygonCoordinates(coordinates: any): LatLngLiteral[] {
@@ -80,14 +95,20 @@ export async function getIsocroneFromMapbox(
   }
 
   const profile = options.profile ?? "driving";
-  const minutes = normalizeMinutes(options.minutes);
+  const usingMeters = options.meters !== undefined;
+  const contours = usingMeters
+    ? normalizeContours(options.meters, 1, 100000, 1000)
+    : normalizeContours(options.minutes, 1, 60, 10);
+  const contourParam = usingMeters ? "contours_meters" : "contours_minutes";
   const visualization = options.visualization ?? "polygon";
 
+  const contoursValue = Array.isArray(contours) ? contours.join(",") : String(contours);
+
   const params = new URLSearchParams({
-    contours_minutes: String(minutes),
     polygons: "true",
     access_token: token,
   });
+  params.set(contourParam, contoursValue);
 
   const url = `${MAPBOX_ISOCHRONE_BASE_URL}/${profile}/${lng},${lat}?${params.toString()}`;
 
@@ -118,7 +139,8 @@ export async function getIsocroneFromMapbox(
   return {
     source: "mapbox",
     profile,
-    minutes,
+    contours,
+    contourParam,
     visualization,
     features,
     polygonPaths,
