@@ -5,6 +5,12 @@ import { mapGeoJson } from "../data/geojson";
 import { VEGETATION_LOCAL_STYLE } from "../estilos mapa/vegetacion y caminos";
 import { getIsocroneFromMapbox, type MapboxProfile } from "./isocrone";
 import { getGoogleMapsScriptSrc } from "../library/googleMapsScript";
+import {
+  createGooglePolygonFromCoords,
+  figureToPolygonPaths,
+  geoJsonGeometryToPolygonPaths,
+  type LatLngLiteral,
+} from "../library/polygons";
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const MAP_LOAD_COST_USD = Number(process.env.NEXT_PUBLIC_MAP_LOAD_COST_USD ?? "0.007");
@@ -15,8 +21,6 @@ type IsoContourSelection = "10" | "20" | "30" | "40" | "50" | "interval-15";
 type IsoMetersSelection = "1000" | "5000" | "20000" | "interval-10000";
 type IsoContourUnit = "minutes" | "meters";
 
-type LatLngLiteral = { lat: number; lng: number };
-
 const CENTER_ZONE_10: LatLngLiteral = { lat: 14.5887, lng: -90.5054 };
 const GUATEMALA_BOUNDS = {
   north: 17.82,
@@ -24,37 +28,10 @@ const GUATEMALA_BOUNDS = {
   west: -92.23,
   east: -88.22,
 };
-
-function toLatLngPathsFromGeometry(geometry: any): LatLngLiteral[][] {
-  if (!geometry?.type || !geometry?.coordinates) return [];
-
-  const mapRingToPath = (ring: any): LatLngLiteral[] =>
-    Array.isArray(ring)
-      ? ring
-          .map((pair: any) => {
-            if (!Array.isArray(pair) || pair.length < 2) return null;
-            const lng = Number(pair[0]);
-            const lat = Number(pair[1]);
-            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-            return { lat, lng };
-          })
-          .filter(Boolean) as LatLngLiteral[]
-      : [];
-
-  if (geometry.type === "Polygon") {
-    const outerRing = geometry.coordinates[0];
-    const path = mapRingToPath(outerRing);
-    return path.length >= 3 ? [path] : [];
-  }
-
-  if (geometry.type === "MultiPolygon") {
-    return geometry.coordinates
-      .map((polygon: any) => mapRingToPath(polygon?.[0]))
-      .filter((path: LatLngLiteral[]) => path.length >= 3);
-  }
-
-  return [];
-}
+const HIDE_DEFAULT_GOOGLE_POI_STYLE = [
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "transit", stylers: [{ visibility: "off" }] },
+];
 
 export function Circle() {
   const mapRef = useRef<HTMLDivElement | null>(null);
@@ -162,7 +139,7 @@ export function Circle() {
       });
 
       sortedFeatures.forEach((feature: any, index: number) => {
-        const paths = toLatLngPathsFromGeometry(feature?.geometry);
+        const paths = geoJsonGeometryToPolygonPaths(feature?.geometry);
         if (!paths.length) return;
 
         const fillColor = String(
@@ -175,9 +152,8 @@ export function Circle() {
         paths.forEach((path) => {
           path.forEach((point) => bounds.extend(point));
 
-          const polygon = new googleAny.maps.Polygon({
+          const polygon = createGooglePolygonFromCoords(googleAny, path, {
             map,
-            paths: path,
             strokeColor,
             strokeOpacity: 1,
             strokeWeight: 2,
@@ -211,7 +187,11 @@ export function Circle() {
     const isoPolygons = isoPolygonsRef.current;
 
     if (!googleAny || !mapInstanceRef.current) return;
-    const hasAnyActiveFilter = shapes.length > 0 || isoPolygons.length > 0;
+    const shapePolygons = shapes.flatMap((shape) =>
+      figureToPolygonPaths(googleAny, shape).map((path) => createGooglePolygonFromCoords(googleAny, path)),
+    );
+    const activePolygons = [...isoPolygons, ...shapePolygons];
+    const hasAnyActiveFilter = activePolygons.length > 0;
 
     markersRef.current.forEach((marker: any) => {
       const position = marker.getPosition();
@@ -221,37 +201,31 @@ export function Circle() {
         return;
       }
 
-      const isVisibleInShapes = shapes.some((shape) => {
-        if (!shape) return false;
-
-        if (shape instanceof googleAny.maps.Circle) {
-          const center = shape.getCenter();
-          const radius = shape.getRadius();
-          if (!center || typeof radius !== "number") return false;
-          const distance = googleAny.maps.geometry.spherical.computeDistanceBetween(
-            center,
-            position,
-          );
-          return distance <= radius;
-        }
-
-        if (shape instanceof googleAny.maps.Polygon) {
-          return googleAny.maps.geometry.poly.containsLocation(position, shape);
-        }
-
-        if (shape instanceof googleAny.maps.Polyline) {
-          // 0.001 deg ~ 100m de tolerancia para considerar "sobre la ruta".
-          return googleAny.maps.geometry.poly.isLocationOnEdge(position, shape, 0.001);
-        }
-
-        return false;
-      });
-
-      const isVisibleInIso = isoPolygons.some((polygon) =>
-        googleAny.maps.geometry.poly.containsLocation(position, polygon),
+      const isVisible = activePolygons.some((polygon) =>
+        googleAny.maps.geometry.poly.containsLocation(
+          position,
+          polygon,
+        ),
       );
 
-      marker.setMap(isVisibleInShapes || isVisibleInIso ? mapInstanceRef.current : null);
+      marker.setMap(isVisible ? mapInstanceRef.current : null);
+    });
+    updateMapBaseVisuals();
+  };
+
+  const updateMapBaseVisuals = () => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const hasAnyActiveFilter = shapesRef.current.length > 0 || isoPolygonsRef.current.length > 0;
+    const baseStyles = mapType === "vegetacion" ? VEGETATION_LOCAL_STYLE : [];
+    const styles = hasAnyActiveFilter
+      ? (baseStyles.length ? baseStyles : null)
+      : [...baseStyles, ...HIDE_DEFAULT_GOOGLE_POI_STYLE];
+
+    map.setOptions({
+      styles,
+      clickableIcons: hasAnyActiveFilter,
     });
   };
 
@@ -326,6 +300,7 @@ export function Circle() {
         },
       });
       mapInstanceRef.current = map;
+      updateMapBaseVisuals();
 
       if (!hasCountedLoadRef.current) {
         hasCountedLoadRef.current = true;
@@ -489,14 +464,10 @@ export function Circle() {
     if (!mapInstanceRef.current) return;
     if (mapType === "vegetacion") {
       mapInstanceRef.current.setMapTypeId("roadmap");
-      mapInstanceRef.current.setOptions({
-        styles: VEGETATION_LOCAL_STYLE,
-      });
-      return;
+    } else {
+      mapInstanceRef.current.setMapTypeId(mapType);
     }
-
-    mapInstanceRef.current.setOptions({ styles: null });
-    mapInstanceRef.current.setMapTypeId(mapType);
+    updateMapBaseVisuals();
   }, [mapType]);
 
   useEffect(() => {
