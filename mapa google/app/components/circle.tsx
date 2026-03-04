@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { mapGeoJson } from "../data/geojson";
 import { VEGETATION_LOCAL_STYLE } from "../estilos mapa/vegetacion y caminos";
+import { getIsoPolygonStyle, type IsoStyleOption } from "../estilos mapa/estilos iso/isoStyles";
 import { getIsocroneFromMapbox, type MapboxProfile } from "./isocrone";
 import { getGoogleMapsScriptSrc } from "../library/googleMapsScript";
 import {
@@ -19,7 +20,7 @@ type DrawMode = "circle" | "polygon" | "polyline" | null;
 type InteractionMode = "measure" | "iso" | null;
 type IsoContourSelection = "10" | "20" | "30" | "40" | "50" | "interval-15";
 type IsoMetersSelection = "1000" | "5000" | "20000" | "interval-10000";
-type IsoContourUnit = "minutes" | "meters";
+type IsoContourUnit = "minutes" | "meters" | "hibrido";
 
 const CENTER_ZONE_10: LatLngLiteral = { lat: 14.5887, lng: -90.5054 };
 const GUATEMALA_BOUNDS = {
@@ -32,6 +33,9 @@ const HIDE_DEFAULT_GOOGLE_POI_STYLE = [
   { featureType: "poi", stylers: [{ visibility: "off" }] },
   { featureType: "transit", stylers: [{ visibility: "off" }] },
 ];
+const NEARBY_PLACES_RADIUS_METERS = 15000;
+const NEARBY_PLACES_MAX_RESULTS = 20;
+const NEARBY_PLACE_TYPES = ["restaurant", "cafe", "hospital", "school", "bank", "pharmacy"];
 
 export function Circle() {
   const mapRef = useRef<HTMLDivElement | null>(null);
@@ -44,6 +48,9 @@ export function Circle() {
   const measureLineRef = useRef<any>(null);
   const isoMarkerRef = useRef<any>(null);
   const isoPolygonsRef = useRef<any[]>([]);
+  const placesMarkersRef = useRef<any[]>([]);
+  const hasFetchedPlacesRef = useRef(false);
+  const isFetchingPlacesRef = useRef(false);
   const interactionModeRef = useRef<InteractionMode>(null);
   const pickingIsoPointRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,9 +67,18 @@ export function Circle() {
   const [isoMeters, setIsoMeters] = useState(1000);
   const [isoMetersSelection, setIsoMetersSelection] = useState<IsoMetersSelection>("1000");
   const [isoContourUnit, setIsoContourUnit] = useState<IsoContourUnit>("minutes");
+  const [isoStyleOption, setIsoStyleOption] = useState<IsoStyleOption>("basica");
   const [isoLatitude, setIsoLatitude] = useState<number>(CENTER_ZONE_10.lat);
   const [isoLongitude, setIsoLongitude] = useState<number>(CENTER_ZONE_10.lng);
   const [isPickingIsoPoint, setIsPickingIsoPoint] = useState(false);
+
+  const isPointInAnyPolygon = (googleAny: any, point: any, polygons: any[]) => {
+    return polygons.some((polygon) => {
+      const inside = googleAny.maps.geometry.poly.containsLocation(point, polygon);
+      if (inside) return true;
+      return googleAny.maps.geometry.poly.isLocationOnEdge(point, polygon, 0.00001);
+    });
+  };
 
   const clearPointSelection = () => {
     clickPointsRef.current = [];
@@ -119,53 +135,107 @@ export function Circle() {
         isoContourSelection === "interval-15" ? [15, 30, 45, 60] : isoMinutes;
       const contourMeters =
         isoMetersSelection === "interval-10000" ? [10000, 20000, 30000, 40000] : isoMeters;
-
-      const iso = await getIsocroneFromMapbox(isoLatitude, isoLongitude, {
-        profile: isoProfile,
-        minutes: isoContourUnit === "minutes" ? contourMinutes : undefined,
-        meters: isoContourUnit === "meters" ? contourMeters : undefined,
-        visualization: "polygon",
-      });
-
-      console.log("ISO API RESULT:", iso.raw);
-
-      const features = Array.isArray(iso.features) ? iso.features : [];
-      const polygonsToRender: any[] = [];
       const bounds = new googleAny.maps.LatLngBounds();
-      const sortedFeatures = [...features].sort((a: any, b: any) => {
-        const aContour = Number(a?.properties?.contour ?? 0);
-        const bContour = Number(b?.properties?.contour ?? 0);
-        return bContour - aContour;
-      });
-
-      sortedFeatures.forEach((feature: any, index: number) => {
-        const paths = geoJsonGeometryToPolygonPaths(feature?.geometry);
-        if (!paths.length) return;
-
-        const fillColor = String(
-          feature?.properties?.fillColor ?? feature?.properties?.fill ?? "#ef4444",
-        );
-        const strokeColor = fillColor;
-        const fillOpacity = Number(
-          feature?.properties?.["fill-opacity"] ?? feature?.properties?.fillOpacity ?? 0.18,
-        );
-        paths.forEach((path) => {
-          path.forEach((point) => bounds.extend(point));
-
-          const polygon = createGooglePolygonFromCoords(googleAny, path, {
-            map,
-            strokeColor,
-            strokeOpacity: 1,
-            strokeWeight: 2,
-            fillColor,
-            fillOpacity: Number.isFinite(fillOpacity) ? fillOpacity : 0.18,
-            clickable: false,
-          });
-          polygonsToRender.push(polygon);
+      const polygonsToRender: any[] = [];
+      const renderIsoFeatures = (
+        features: any[],
+        styleResolver: (feature: any, index: number) => {
+          strokeColor: string;
+          strokeOpacity: number;
+          strokeWeight: number;
+          fillColor: string;
+          fillOpacity: number;
+        },
+      ) => {
+        const sortedFeatures = [...features].sort((a: any, b: any) => {
+          const aContour = Number(a?.properties?.contour ?? 0);
+          const bContour = Number(b?.properties?.contour ?? 0);
+          return bContour - aContour;
         });
-      });
+
+        sortedFeatures.forEach((feature: any, index: number) => {
+          const paths = geoJsonGeometryToPolygonPaths(feature?.geometry);
+          if (!paths.length) return;
+          const polygonStyle = styleResolver(feature, index);
+
+          paths.forEach((path) => {
+            path.forEach((point) => bounds.extend(point));
+            const polygon = createGooglePolygonFromCoords(googleAny, path, {
+              map,
+              strokeColor: polygonStyle.strokeColor,
+              strokeOpacity: polygonStyle.strokeOpacity,
+              strokeWeight: polygonStyle.strokeWeight,
+              fillColor: polygonStyle.fillColor,
+              fillOpacity: polygonStyle.fillOpacity,
+              clickable: false,
+            });
+            polygonsToRender.push(polygon);
+          });
+        });
+      };
+
+      if (isoContourUnit === "hibrido") {
+        const [minutesIso, metersIso] = await Promise.all([
+          getIsocroneFromMapbox(isoLatitude, isoLongitude, {
+            profile: isoProfile,
+            minutes: contourMinutes,
+            visualization: "polygon",
+          }),
+          getIsocroneFromMapbox(isoLatitude, isoLongitude, {
+            profile: isoProfile,
+            meters: contourMeters,
+            visualization: "polygon",
+          }),
+        ]);
+
+        renderIsoFeatures(minutesIso.features, (_feature, index) => ({
+          strokeColor: "#dc2626",
+          strokeOpacity: 1,
+          strokeWeight: index === 0 ? 3 : 2,
+          fillColor: "#ef4444",
+          fillOpacity: 0.22,
+        }));
+        renderIsoFeatures(metersIso.features, (_feature, index) => ({
+          strokeColor: "#1d4ed8",
+          strokeOpacity: 1,
+          strokeWeight: index === 0 ? 3 : 2,
+          fillColor: "#3b82f6",
+          fillOpacity: 0.22,
+        }));
+
+        console.log("ISO HYBRID MINUTES:", minutesIso.raw);
+        console.log("ISO HYBRID METERS:", metersIso.raw);
+        setIsoResult("Isocronas hibridas creadas (tiempo rojo, distancia azul).");
+      } else {
+        const iso = await getIsocroneFromMapbox(isoLatitude, isoLongitude, {
+          profile: isoProfile,
+          minutes: isoContourUnit === "meters" ? undefined : contourMinutes,
+          meters: isoContourUnit === "meters" ? contourMeters : undefined,
+          visualization: "polygon",
+        });
+
+        console.log("ISO API RESULT:", iso.raw);
+        renderIsoFeatures(iso.features, (feature, index) => {
+          const polygonStyle = getIsoPolygonStyle(isoStyleOption, feature, index);
+          return {
+            strokeColor: polygonStyle.strokeColor,
+            strokeOpacity: polygonStyle.strokeOpacity,
+            strokeWeight: polygonStyle.strokeWeight,
+            fillColor: polygonStyle.fillColor,
+            fillOpacity: polygonStyle.fillOpacity,
+          };
+        });
+
+        const contourLabel = Array.isArray(iso.contours) ? iso.contours.join(", ") : String(iso.contours);
+        const contourUnitLabel = iso.contourParam === "contours_meters" ? "m" : "min";
+        setIsoResult(`Isocrona creada (${contourLabel} ${contourUnitLabel}, ${iso.profile}).`);
+      }
 
       isoPolygonsRef.current = polygonsToRender;
+      hasFetchedPlacesRef.current = false;
+      placesMarkersRef.current.forEach((marker) => marker.setMap(null));
+      placesMarkersRef.current = [];
+      void fetchNearbyPlacesOnce({ lat: isoLatitude, lng: isoLongitude });
 
       if (!bounds.isEmpty()) {
         map.fitBounds(bounds, 40);
@@ -173,11 +243,70 @@ export function Circle() {
         map.panTo({ lat: isoLatitude, lng: isoLongitude });
       }
       updateMarkersVisibility();
-      const contourLabel = Array.isArray(iso.contours) ? iso.contours.join(", ") : String(iso.contours);
-      const contourUnitLabel = iso.contourParam === "contours_meters" ? "m" : "min";
-      setIsoResult(`Isocrona creada (${contourLabel} ${contourUnitLabel}, ${iso.profile}).`);
     } catch (isoError: any) {
       setIsoResult(`Error ISO: ${isoError?.message ?? "No se pudo generar isocrona."}`);
+    }
+  };
+
+  const fetchNearbyPlacesOnce = async (centerOverride?: LatLngLiteral) => {
+    const googleAny = (window as any).google;
+    const map = mapInstanceRef.current;
+    if (!googleAny?.maps?.importLibrary || !map || hasFetchedPlacesRef.current || isFetchingPlacesRef.current) {
+      return;
+    }
+
+    isFetchingPlacesRef.current = true;
+
+    try {
+      const { Place, SearchNearbyRankPreference } = await googleAny.maps.importLibrary("places");
+      const center = map.getCenter();
+
+      const requestBase = {
+        fields: ["displayName", "location", "id"],
+        locationRestriction: {
+          center: centerOverride ??
+            (center
+              ? { lat: center.lat(), lng: center.lng() }
+              : CENTER_ZONE_10),
+          radius: NEARBY_PLACES_RADIUS_METERS,
+        },
+        maxResultCount: NEARBY_PLACES_MAX_RESULTS,
+        rankPreference: SearchNearbyRankPreference.POPULARITY,
+      };
+
+      let response: any;
+      try {
+        response = await Place.searchNearby({
+          ...requestBase,
+          includedTypes: NEARBY_PLACE_TYPES,
+        });
+      } catch {
+        response = await Place.searchNearby({
+          ...requestBase,
+          includedPrimaryTypes: ["restaurant"],
+        });
+      }
+      const places = Array.isArray(response?.places) ? response.places : [];
+
+      placesMarkersRef.current = places
+        .filter((place: any) => place?.location)
+        .map((place: any) => {
+          // TODO: Restaurar iconos personalizados de POIs cuando definamos una estrategia
+          // de bajo consumo (campos extra/tipos/fallback) que no incremente llamadas/costo.
+          return new googleAny.maps.Marker({
+            map: null,
+            position: place.location,
+            title: place?.displayName?.text ?? place?.displayName ?? "POI",
+          });
+        });
+
+      hasFetchedPlacesRef.current = true;
+      updateMarkersVisibility();
+    } catch (placesError) {
+      console.error("Places API (New) error:", placesError);
+      hasFetchedPlacesRef.current = false;
+    } finally {
+      isFetchingPlacesRef.current = false;
     }
   };
 
@@ -192,6 +321,9 @@ export function Circle() {
     );
     const activePolygons = [...isoPolygons, ...shapePolygons];
     const hasAnyActiveFilter = activePolygons.length > 0;
+    if (hasAnyActiveFilter && !hasFetchedPlacesRef.current && !isFetchingPlacesRef.current) {
+      void fetchNearbyPlacesOnce();
+    }
 
     markersRef.current.forEach((marker: any) => {
       const position = marker.getPosition();
@@ -201,12 +333,20 @@ export function Circle() {
         return;
       }
 
-      const isVisible = activePolygons.some((polygon) =>
-        googleAny.maps.geometry.poly.containsLocation(
-          position,
-          polygon,
-        ),
-      );
+      const isVisible = isPointInAnyPolygon(googleAny, position, activePolygons);
+
+      marker.setMap(isVisible ? mapInstanceRef.current : null);
+    });
+
+    placesMarkersRef.current.forEach((marker: any) => {
+      const position = marker.getPosition();
+      if (!position) return;
+      if (!hasAnyActiveFilter) {
+        marker.setMap(null);
+        return;
+      }
+
+      const isVisible = isPointInAnyPolygon(googleAny, position, activePolygons);
 
       marker.setMap(isVisible ? mapInstanceRef.current : null);
     });
@@ -217,15 +357,12 @@ export function Circle() {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    const hasAnyActiveFilter = shapesRef.current.length > 0 || isoPolygonsRef.current.length > 0;
     const baseStyles = mapType === "vegetacion" ? VEGETATION_LOCAL_STYLE : [];
-    const styles = hasAnyActiveFilter
-      ? (baseStyles.length ? baseStyles : null)
-      : [...baseStyles, ...HIDE_DEFAULT_GOOGLE_POI_STYLE];
+    const styles = [...baseStyles, ...HIDE_DEFAULT_GOOGLE_POI_STYLE];
 
     map.setOptions({
       styles,
-      clickableIcons: hasAnyActiveFilter,
+      clickableIcons: false,
     });
   };
 
@@ -261,6 +398,7 @@ export function Circle() {
     shapesRef.current.forEach((shape) => shape.setMap(null));
     shapesRef.current = [];
     markersRef.current.forEach((marker) => marker.setMap(null));
+    placesMarkersRef.current.forEach((marker) => marker.setMap(null));
     clearRouteAndMeasure();
     setInteractionMode(null);
   };
@@ -435,18 +573,29 @@ export function Circle() {
       });
     };
 
-    if ((window as any).google?.maps?.drawing && (window as any).google?.maps?.geometry) {
+    if (
+      (window as any).google?.maps?.drawing &&
+      (window as any).google?.maps?.geometry
+    ) {
       initMap();
       return;
     }
 
     if (existingScript) {
-      existingScript.addEventListener("load", initMap, { once: true });
-      return () => existingScript.removeEventListener("load", initMap);
+      const hasRequiredLibraries =
+        (window as any).google?.maps?.drawing &&
+        (window as any).google?.maps?.geometry;
+
+      if (hasRequiredLibraries) {
+        initMap();
+        return;
+      }
+
+      existingScript.remove();
     }
 
     const script = document.createElement("script");
-    script.src = getGoogleMapsScriptSrc(GOOGLE_MAPS_API_KEY, ["drawing", "geometry"]);
+    script.src = getGoogleMapsScriptSrc(GOOGLE_MAPS_API_KEY, ["drawing", "geometry", "places"]);
     script.async = true;
     script.defer = true;
     script.dataset.googleMaps = "true";
@@ -504,6 +653,40 @@ export function Circle() {
   const estimatedCost = (mapLoadCount * MAP_LOAD_COST_USD).toFixed(4);
   const contourMinuteOptions = [10, 20, 30, 40, 50];
   const contourMeterOptions = [1000, 5000, 20000];
+  const selectedMinutesLabel =
+    isoContourSelection === "interval-15"
+      ? "15, 30, 45, 60 min"
+      : `${isoMinutes} min`;
+  const selectedMetersLabel =
+    isoMetersSelection === "interval-10000"
+      ? "10000, 20000, 30000, 40000 m"
+      : `${isoMeters} m`;
+  const referenceTypeLabel =
+    isoContourUnit === "hibrido"
+      ? "Tiempo y Distancia"
+      : isoContourUnit === "meters"
+        ? "Distancia"
+        : "Tiempo";
+  const referenceValueLabel =
+    isoContourUnit === "hibrido"
+      ? `${selectedMinutesLabel} | ${selectedMetersLabel}`
+      : isoContourUnit === "meters"
+        ? selectedMetersLabel
+        : selectedMinutesLabel;
+  const referenceRows = [
+    {
+      style: "basica",
+      colors: ["#ef4444"],
+    },
+    {
+      style: "segunda opcion",
+      colors: ["#dc2626", "#f97316", "#facc15", "#22c55e", "#38bdf8", "#2563eb"],
+    },
+    {
+      style: "tercera opcion",
+      colors: ["#1A2B44", "#1D3D6E", "#3C3B82", "#7D3888", "#C23482"],
+    },
+  ];
 
   return (
     <section style={{ position: "relative", width: "100%", height: "100vh" }}>
@@ -689,6 +872,17 @@ export function Circle() {
               >
                 Metros
               </button>
+              <button
+                type="button"
+                onClick={() => setIsoContourUnit("hibrido")}
+                className={`rounded-md px-3 py-1 text-sm ${
+                  isoContourUnit === "hibrido"
+                    ? "bg-blue-600 font-medium text-white"
+                    : "text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                Hibrido
+              </button>
             </div>
 
             {isoContourUnit === "minutes" ? (
@@ -716,7 +910,7 @@ export function Circle() {
                   Intervalos de 15 min (15, 30, 45, 60)
                 </option>
               </select>
-            ) : (
+            ) : isoContourUnit === "meters" ? (
               <select
                 value={isoMetersSelection}
                 onChange={(event) => {
@@ -741,7 +935,78 @@ export function Circle() {
                   Intervalo de 10000 (10000, 20000, 30000, 40000)
                 </option>
               </select>
+            ) : (
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                <label className="flex flex-col gap-1 text-xs text-slate-600">
+                  <span className="font-medium">Tiempo</span>
+                  <select
+                    value={isoContourSelection}
+                    onChange={(event) => {
+                      const nextValue = event.target.value as IsoContourSelection;
+                      setIsoContourSelection(nextValue);
+
+                      if (nextValue !== "interval-15") {
+                        const nextMinutes = Number(nextValue);
+                        if (Number.isFinite(nextMinutes)) {
+                          setIsoMinutes(nextMinutes);
+                        }
+                      }
+                    }}
+                    className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    {contourMinuteOptions.map((minutes) => (
+                      <option key={minutes} value={minutes} className="rounded px-2 py-1">
+                        {minutes} min
+                      </option>
+                    ))}
+                    <option value="interval-15" className="rounded px-2 py-1">
+                      Intervalos de 15 min (15, 30, 45, 60)
+                    </option>
+                  </select>
+                </label>
+
+                <label className="flex flex-col gap-1 text-xs text-slate-600">
+                  <span className="font-medium">Distancia</span>
+                  <select
+                    value={isoMetersSelection}
+                    onChange={(event) => {
+                      const nextValue = event.target.value as IsoMetersSelection;
+                      setIsoMetersSelection(nextValue);
+
+                      if (nextValue !== "interval-10000") {
+                        const nextMeters = Number(nextValue);
+                        if (Number.isFinite(nextMeters)) {
+                          setIsoMeters(nextMeters);
+                        }
+                      }
+                    }}
+                    className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  >
+                    {contourMeterOptions.map((meters) => (
+                      <option key={meters} value={meters} className="rounded px-2 py-1">
+                        {meters} m
+                      </option>
+                    ))}
+                    <option value="interval-10000" className="rounded px-2 py-1">
+                      Intervalo de 10000 (10000, 20000, 30000, 40000)
+                    </option>
+                  </select>
+                </label>
+              </div>
             )}
+          </div>
+
+          <div className="mt-4">
+            <p className="text-sm font-semibold text-slate-900">Estilos</p>
+            <select
+              value={isoStyleOption}
+              onChange={(event) => setIsoStyleOption(event.target.value as IsoStyleOption)}
+              className="mt-2 w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="basica">basica</option>
+              <option value="segunda-opcion">segunda opcion</option>
+              <option value="tercera-opcion">tercera opcion</option>
+            </select>
           </div>
 
 
@@ -773,6 +1038,45 @@ export function Circle() {
             >
               Crear
             </button>
+          </div>
+
+          <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <p className="text-sm font-semibold text-slate-900">Tabla de Referencia</p>
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[560px] border-collapse text-xs text-slate-700">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="px-2 py-2 text-left font-semibold">Estilo</th>
+                    <th className="px-2 py-2 text-left font-semibold">Perfil</th>
+                    <th className="px-2 py-2 text-left font-semibold">Color</th>
+                    <th className="px-2 py-2 text-left font-semibold">Tipo</th>
+                    <th className="px-2 py-2 text-left font-semibold">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {referenceRows.map((row) => (
+                    <tr key={row.style} className="border-b border-slate-200 last:border-b-0">
+                      <td className="px-2 py-2 capitalize">{row.style}</td>
+                      <td className="px-2 py-2">{isoProfile || "sin perfil"}</td>
+                      <td className="px-2 py-2">
+                        <div className="flex flex-wrap gap-1">
+                          {row.colors.map((color) => (
+                            <span
+                              key={`${row.style}-${color}`}
+                              className="inline-block h-3 w-3 rounded-sm border border-slate-300"
+                              style={{ backgroundColor: color }}
+                              title={color}
+                            />
+                          ))}
+                        </div>
+                      </td>
+                      <td className="px-2 py-2">{referenceTypeLabel}</td>
+                      <td className="px-2 py-2">{referenceValueLabel}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </aside>
       ) : null}
