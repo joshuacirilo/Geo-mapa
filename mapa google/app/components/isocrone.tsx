@@ -6,6 +6,7 @@ type IsochroneOptions = {
   profile?: MapboxProfile;
   minutes?: number | number[];
   meters?: number | number[];
+  departAt?: string;
   visualization?: "polygon" | "street_network";
 };
 
@@ -101,6 +102,7 @@ export async function getIsocroneFromMapbox(
     : normalizeContours(options.minutes, 1, 60, 10);
   const contourParam = usingMeters ? "contours_meters" : "contours_minutes";
   const visualization = options.visualization ?? "polygon";
+  const departAt = String(options.departAt ?? "").trim();
 
   const contoursValue = Array.isArray(contours) ? contours.join(",") : String(contours);
 
@@ -109,6 +111,9 @@ export async function getIsocroneFromMapbox(
     access_token: token,
   });
   params.set(contourParam, contoursValue);
+  if (departAt) {
+    params.set("depart_at", departAt);
+  }
 
   const url = `${MAPBOX_ISOCHRONE_BASE_URL}/${profile}/${lng},${lat}?${params.toString()}`;
 

@@ -7,6 +7,13 @@ import { getIsoPolygonStyle, type IsoStyleOption } from "../estilos mapa/estilos
 import { getIsocroneFromMapbox, type MapboxProfile } from "./isocrone";
 import { getGoogleMapsScriptSrc } from "../library/googleMapsScript";
 import {
+  TRAFFIC_ISO_PROFILE,
+  normalizeDepartAt,
+  resolveTrafficMinutes,
+  type TrafficMinutesSelection,
+} from "../library/trafficIso";
+import { fetchMapboxTrafficTileJson } from "../library/mapboxTraffic";
+import {
   createGooglePolygonFromCoords,
   figureToPolygonPaths,
   geoJsonGeometryToPolygonPaths,
@@ -15,12 +22,16 @@ import {
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const MAP_LOAD_COST_USD = Number(process.env.NEXT_PUBLIC_MAP_LOAD_COST_USD ?? "0.007");
+const ISO_DISTANCE_CALC_PROFILE: MapboxProfile = "walking";
+const ISO_NO_TRAFFIC_PROFILE: MapboxProfile = "cycling";
 
 type DrawMode = "circle" | "polygon" | "polyline" | null;
 type InteractionMode = "measure" | "iso" | null;
 type IsoContourSelection = "10" | "20" | "30" | "40" | "50" | "interval-15";
 type IsoMetersSelection = "1000" | "5000" | "20000" | "interval-10000";
-type IsoContourUnit = "minutes" | "meters" | "hibrido";
+type IsoCalculatedTimeSelection = "10" | "20" | "30" | "40" | "interval-10";
+type IsoContourUnit = "minutes" | "meters" | "hibrido" | "calculada";
+type IsoTrafficProfile = "sin-trafico" | "con-trafico";
 
 const CENTER_ZONE_10: LatLngLiteral = { lat: 14.5887, lng: -90.5054 };
 const GUATEMALA_BOUNDS = {
@@ -49,8 +60,10 @@ export function Circle() {
   const isoMarkerRef = useRef<any>(null);
   const isoPolygonsRef = useRef<any[]>([]);
   const placesMarkersRef = useRef<any[]>([]);
+  const trafficLayerRef = useRef<any>(null);
   const hasFetchedPlacesRef = useRef(false);
   const isFetchingPlacesRef = useRef(false);
+  const hasValidatedMapboxTrafficRef = useRef(false);
   const interactionModeRef = useRef<InteractionMode>(null);
   const pickingIsoPointRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,12 +74,19 @@ export function Circle() {
   const hasCountedLoadRef = useRef(false);
   const [measureResult, setMeasureResult] = useState<string>("");
   const [isoResult, setIsoResult] = useState<string>("");
-  const [isoProfile, setIsoProfile] = useState<MapboxProfile | "">("");
   const [isoMinutes, setIsoMinutes] = useState(10);
   const [isoContourSelection, setIsoContourSelection] = useState<IsoContourSelection>("10");
   const [isoMeters, setIsoMeters] = useState(1000);
   const [isoMetersSelection, setIsoMetersSelection] = useState<IsoMetersSelection>("1000");
-  const [isoContourUnit, setIsoContourUnit] = useState<IsoContourUnit>("minutes");
+  const [isoContourUnit, setIsoContourUnit] = useState<IsoContourUnit>("meters");
+  const [isoTrafficProfile, setIsoTrafficProfile] = useState<IsoTrafficProfile>("sin-trafico");
+  const [isoHybridSpeedKmh, setIsoHybridSpeedKmh] = useState(10);
+  const [isoCustomSpeedKmh, setIsoCustomSpeedKmh] = useState(10);
+  const [isoCalculatedTimeSelection, setIsoCalculatedTimeSelection] =
+    useState<IsoCalculatedTimeSelection>("30");
+  const [isoTrafficMinutesSelection, setIsoTrafficMinutesSelection] =
+    useState<TrafficMinutesSelection>("30");
+  const [isoTrafficDepartAt, setIsoTrafficDepartAt] = useState("");
   const [isoStyleOption, setIsoStyleOption] = useState<IsoStyleOption>("basica");
   const [isoLatitude, setIsoLatitude] = useState<number>(CENTER_ZONE_10.lat);
   const [isoLongitude, setIsoLongitude] = useState<number>(CENTER_ZONE_10.lng);
@@ -107,10 +127,6 @@ export function Circle() {
     const map = mapInstanceRef.current;
     if (!googleAny || !map) return;
 
-    if (!isoProfile) {
-      setIsoResult("Selecciona un profile ISO.");
-      return;
-    }
     if (!Number.isFinite(isoLatitude) || !Number.isFinite(isoLongitude)) {
       setIsoResult("Latitud/Longitud no validas.");
       return;
@@ -131,12 +147,26 @@ export function Circle() {
     setIsoResult("Calculando isocrona...");
 
     try {
+      const currentDrivingProfile: MapboxProfile =
+        isoTrafficProfile === "con-trafico" ? TRAFFIC_ISO_PROFILE : ISO_NO_TRAFFIC_PROFILE;
       const contourMinutes =
         isoContourSelection === "interval-15" ? [15, 30, 45, 60] : isoMinutes;
       const contourMeters =
         isoMetersSelection === "interval-10000" ? [10000, 20000, 30000, 40000] : isoMeters;
+      const customSpeedMps = (isoCustomSpeedKmh * 1000) / 3600;
+      const calculatedMinutesList =
+        isoCalculatedTimeSelection === "interval-10"
+          ? [10, 20, 30, 40]
+          : [Number(isoCalculatedTimeSelection)];
+      const calculatedMetersContours = calculatedMinutesList.map((minutes) =>
+        Math.max(1, Math.round(customSpeedMps * (minutes * 60))),
+      );
+      const calculatedMeters =
+        calculatedMetersContours.length === 1 ? calculatedMetersContours[0] : calculatedMetersContours;
       const bounds = new googleAny.maps.LatLngBounds();
       const polygonsToRender: any[] = [];
+      const trafficMinutes = resolveTrafficMinutes(isoTrafficMinutesSelection);
+      const trafficDepartAt = normalizeDepartAt(isoTrafficDepartAt);
       const renderIsoFeatures = (
         features: any[],
         styleResolver: (feature: any, index: number) => {
@@ -174,15 +204,88 @@ export function Circle() {
         });
       };
 
-      if (isoContourUnit === "hibrido") {
+      if (isoContourUnit === "calculada") {
+        if (isoTrafficProfile === "con-trafico") {
+          const iso = await getIsocroneFromMapbox(isoLatitude, isoLongitude, {
+            profile: TRAFFIC_ISO_PROFILE,
+            minutes: trafficMinutes,
+            departAt: trafficDepartAt,
+            visualization: "polygon",
+          });
+
+          console.log("ISO TRAFICO REAL RESULT:", iso.raw);
+          renderIsoFeatures(iso.features, (feature, index) => {
+            const polygonStyle = getIsoPolygonStyle(isoStyleOption, feature, index);
+            return {
+              strokeColor: polygonStyle.strokeColor,
+              strokeOpacity: polygonStyle.strokeOpacity,
+              strokeWeight: polygonStyle.strokeWeight,
+              fillColor: polygonStyle.fillColor,
+              fillOpacity: polygonStyle.fillOpacity,
+            };
+          });
+
+          const trafficLabel = Array.isArray(trafficMinutes)
+            ? trafficMinutes.join(", ")
+            : String(trafficMinutes);
+          const departAtSuffix = trafficDepartAt ? ` | depart_at: ${trafficDepartAt}` : "";
+          setIsoResult(
+            `Isocrona por trafico real creada (${trafficLabel} min)${departAtSuffix}.`,
+          );
+        } else if (!Number.isFinite(isoCustomSpeedKmh) || isoCustomSpeedKmh <= 0) {
+          setIsoResult("Velocidad invalida. Usa un valor mayor a 0 km/h.");
+          return;
+        } else {
+          const calculatedMetersList = Array.isArray(calculatedMeters) ? calculatedMeters : [calculatedMeters];
+          const contourChunks: number[][] = [];
+          for (let i = 0; i < calculatedMetersList.length; i += 4) {
+            contourChunks.push(calculatedMetersList.slice(i, i + 4));
+          }
+
+          const isoResponses = await Promise.all(
+            contourChunks.map((chunk) =>
+              getIsocroneFromMapbox(isoLatitude, isoLongitude, {
+                profile: ISO_DISTANCE_CALC_PROFILE,
+                meters: chunk.length === 1 ? chunk[0] : chunk,
+                visualization: "polygon",
+              }),
+            ),
+          );
+
+          const combinedFeatures = isoResponses.flatMap((response) =>
+            Array.isArray(response.features) ? response.features : [],
+          );
+
+          console.log("ISO CALCULADA RESULTS:", isoResponses.map((response) => response.raw));
+          renderIsoFeatures(combinedFeatures, (feature, index) => {
+            const polygonStyle = getIsoPolygonStyle(isoStyleOption, feature, index);
+            return {
+              strokeColor: polygonStyle.strokeColor,
+              strokeOpacity: polygonStyle.strokeOpacity,
+              strokeWeight: polygonStyle.strokeWeight,
+              fillColor: polygonStyle.fillColor,
+              fillOpacity: polygonStyle.fillOpacity,
+            };
+          });
+
+          const calculatedTimeLabel =
+            isoCalculatedTimeSelection === "interval-10"
+              ? "10, 20, 30, 40"
+              : isoCalculatedTimeSelection;
+          const calculatedMetersLabel = calculatedMetersList.join(", ");
+          setIsoResult(
+            `Isocrona calculada creada (${calculatedMetersLabel} m) con velocidad ${isoCustomSpeedKmh} km/h y tiempo ${calculatedTimeLabel} min.`,
+          );
+        }
+      } else if (isoContourUnit === "hibrido") {
         const [minutesIso, metersIso] = await Promise.all([
           getIsocroneFromMapbox(isoLatitude, isoLongitude, {
-            profile: isoProfile,
+            profile: currentDrivingProfile,
             minutes: contourMinutes,
             visualization: "polygon",
           }),
           getIsocroneFromMapbox(isoLatitude, isoLongitude, {
-            profile: isoProfile,
+            profile: currentDrivingProfile,
             meters: contourMeters,
             visualization: "polygon",
           }),
@@ -205,10 +308,16 @@ export function Circle() {
 
         console.log("ISO HYBRID MINUTES:", minutesIso.raw);
         console.log("ISO HYBRID METERS:", metersIso.raw);
-        setIsoResult("Isocronas hibridas creadas (tiempo rojo, distancia azul).");
+        if (isoTrafficProfile === "con-trafico") {
+          setIsoResult("Isocronas hibridas creadas (tiempo rojo, distancia azul) con trafico real.");
+        } else {
+          setIsoResult(
+            `Isocronas hibridas creadas (tiempo rojo, distancia azul) con velocidad ${isoHybridSpeedKmh} km/h.`,
+          );
+        }
       } else {
         const iso = await getIsocroneFromMapbox(isoLatitude, isoLongitude, {
-          profile: isoProfile,
+          profile: currentDrivingProfile,
           minutes: isoContourUnit === "meters" ? undefined : contourMinutes,
           meters: isoContourUnit === "meters" ? contourMeters : undefined,
           visualization: "polygon",
@@ -403,6 +512,31 @@ export function Circle() {
     setInteractionMode(null);
   };
 
+  const updateTrafficLayerVisibility = () => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+
+    const googleAny = (window as any).google;
+    if (!trafficLayerRef.current && googleAny?.maps?.TrafficLayer) {
+      trafficLayerRef.current = new googleAny.maps.TrafficLayer();
+    }
+
+    if (!trafficLayerRef.current) return;
+    const shouldShowTraffic = isoTrafficProfile === "con-trafico";
+    trafficLayerRef.current.setMap(shouldShowTraffic ? map : null);
+
+    if (shouldShowTraffic && !hasValidatedMapboxTrafficRef.current) {
+      hasValidatedMapboxTrafficRef.current = true;
+      void fetchMapboxTrafficTileJson()
+        .then((payload) => {
+          console.log("MAPBOX_TRAFFIC_TILEJSON:", payload);
+        })
+        .catch((trafficError) => {
+          console.error("Mapbox traffic validation error:", trafficError);
+        });
+    }
+  };
+
   useEffect(() => {
     const storedCount = Number(window.localStorage.getItem("maps_api_load_count") ?? "0");
     if (!Number.isNaN(storedCount) && storedCount >= 0) {
@@ -439,6 +573,7 @@ export function Circle() {
       });
       mapInstanceRef.current = map;
       updateMapBaseVisuals();
+      updateTrafficLayerVisibility();
 
       if (!hasCountedLoadRef.current) {
         hasCountedLoadRef.current = true;
@@ -620,6 +755,10 @@ export function Circle() {
   }, [mapType]);
 
   useEffect(() => {
+    updateTrafficLayerVisibility();
+  }, [isoTrafficProfile]);
+
+  useEffect(() => {
     interactionModeRef.current = interactionMode;
   }, [interactionMode]);
 
@@ -661,16 +800,58 @@ export function Circle() {
     isoMetersSelection === "interval-10000"
       ? "10000, 20000, 30000, 40000 m"
       : `${isoMeters} m`;
+  const selectedCalculatedMinutesList =
+    isoCalculatedTimeSelection === "interval-10"
+      ? [10, 20, 30, 40]
+      : [Number(isoCalculatedTimeSelection)];
+  const selectedCalculatedMetersList = selectedCalculatedMinutesList.map((minutes) =>
+    Math.max(1, Math.round(((isoCustomSpeedKmh * 1000) / 3600) * (minutes * 60))),
+  );
+  const selectedTrafficMinutes =
+    isoTrafficMinutesSelection === "interval-15"
+      ? [15, 30, 45]
+      : [Number(isoTrafficMinutesSelection)];
+  const selectedTrafficLabel = Array.isArray(selectedTrafficMinutes)
+    ? selectedTrafficMinutes.join(", ")
+    : String(selectedTrafficMinutes);
+  const selectedCalculatedLabel =
+    isoCalculatedTimeSelection === "interval-10"
+      ? `${isoCustomSpeedKmh} km/h * [10, 20, 30, 40] min = [${selectedCalculatedMetersList.join(", ")}] m`
+      : `${isoCustomSpeedKmh} km/h * ${selectedCalculatedMinutesList[0]} min = ${selectedCalculatedMetersList[0]} m`;
+  const hybridReferenceMinutes =
+    isoContourSelection === "interval-15" ? 60 : isoMinutes;
+  const hybridEstimatedMeters = Math.max(
+    1,
+    Math.round(((isoHybridSpeedKmh * 1000) / 3600) * (hybridReferenceMinutes * 60)),
+  );
+  const selectedHybridLabel =
+    isoTrafficProfile === "con-trafico"
+      ? `${selectedMinutesLabel} | ${selectedMetersLabel} | trafico real`
+      : `${selectedMinutesLabel} | ${selectedMetersLabel} | ${isoHybridSpeedKmh} km/h (~${hybridEstimatedMeters} m por tiempo)`;
+  const currentDrivingProfile: MapboxProfile =
+    isoTrafficProfile === "con-trafico" ? TRAFFIC_ISO_PROFILE : ISO_NO_TRAFFIC_PROFILE;
+  const currentIsoProfileLabel =
+    isoContourUnit === "calculada"
+      ? isoTrafficProfile === "con-trafico"
+        ? TRAFFIC_ISO_PROFILE
+        : ISO_DISTANCE_CALC_PROFILE
+      : currentDrivingProfile;
   const referenceTypeLabel =
     isoContourUnit === "hibrido"
       ? "Tiempo y Distancia"
+      : isoContourUnit === "calculada"
+        ? "Distancia calculada"
       : isoContourUnit === "meters"
         ? "Distancia"
         : "Tiempo";
   const referenceValueLabel =
     isoContourUnit === "hibrido"
-      ? `${selectedMinutesLabel} | ${selectedMetersLabel}`
-      : isoContourUnit === "meters"
+      ? selectedHybridLabel
+      : isoContourUnit === "calculada"
+        ? isoTrafficProfile === "con-trafico"
+          ? `${selectedTrafficLabel} min${isoTrafficDepartAt ? ` | depart_at: ${isoTrafficDepartAt}` : ""}`
+          : selectedCalculatedLabel
+        : isoContourUnit === "meters"
         ? selectedMetersLabel
         : selectedMinutesLabel;
   const referenceRows = [
@@ -821,46 +1002,36 @@ export function Circle() {
           </div>
 
           <div className="mt-4">
-            <p className="text-sm font-semibold text-slate-900">Routing profile</p>
-            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {[
-                { value: "driving", label: "driving" },
-                { value: "driving-traffic", label: "driving-traffic" },
-                { value: "walking", label: "walking" },
-                { value: "cycling", label: "cycling" },
-              ].map((option) => (
-                <label
-                  key={option.value}
-                  className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm text-slate-800"
-                >
-                  <input
-                    type="radio"
-                    name="iso-profile"
-                    value={option.value}
-                    checked={isoProfile === option.value}
-                    onChange={(event) => setIsoProfile(event.target.value as MapboxProfile)}
-                    className="h-4 w-4 accent-blue-600"
-                  />
-                  <span>{option.label}</span>
-                </label>
-              ))}
+            <p className="text-sm font-semibold text-slate-900">Perfiles</p>
+            <div className="mt-2 inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setIsoTrafficProfile("sin-trafico")}
+                className={`rounded-md px-3 py-1 text-sm ${
+                  isoTrafficProfile === "sin-trafico"
+                    ? "bg-blue-600 font-medium text-white"
+                    : "text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                sin trafico
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsoTrafficProfile("con-trafico")}
+                className={`rounded-md px-3 py-1 text-sm ${
+                  isoTrafficProfile === "con-trafico"
+                    ? "bg-blue-600 font-medium text-white"
+                    : "text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                con trafico
+              </button>
             </div>
           </div>
 
           <div className="mt-4">
             <p className="text-sm font-semibold text-slate-900">Contour type</p>
             <div className="mt-2 inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1">
-              <button
-                type="button"
-                onClick={() => setIsoContourUnit("minutes")}
-                className={`rounded-md px-3 py-1 text-sm ${
-                  isoContourUnit === "minutes"
-                    ? "bg-blue-600 font-medium text-white"
-                    : "text-slate-700 hover:bg-slate-200"
-                }`}
-              >
-                Minutos
-              </button>
               <button
                 type="button"
                 onClick={() => setIsoContourUnit("meters")}
@@ -882,6 +1053,17 @@ export function Circle() {
                 }`}
               >
                 Hibrido
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsoContourUnit("calculada")}
+                className={`rounded-md px-3 py-1 text-sm ${
+                  isoContourUnit === "calculada"
+                    ? "bg-blue-600 font-medium text-white"
+                    : "text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                Calculada
               </button>
             </div>
 
@@ -935,7 +1117,7 @@ export function Circle() {
                   Intervalo de 10000 (10000, 20000, 30000, 40000)
                 </option>
               </select>
-            ) : (
+            ) : isoContourUnit === "hibrido" ? (
               <div className="mt-2 grid grid-cols-1 gap-2">
                 <label className="flex flex-col gap-1 text-xs text-slate-600">
                   <span className="font-medium">Tiempo</span>
@@ -966,6 +1148,23 @@ export function Circle() {
                 </label>
 
                 <label className="flex flex-col gap-1 text-xs text-slate-600">
+                  <span className="font-medium">Velocidad (km/h)</span>
+                  {isoTrafficProfile === "con-trafico" ? (
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700">
+                      Gestionada por trafico real
+                    </div>
+                  ) : (
+                    <input
+                      type="number"
+                      min={1}
+                      step="0.1"
+                      value={isoHybridSpeedKmh}
+                      onChange={(event) => setIsoHybridSpeedKmh(Number(event.target.value))}
+                      className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  )}
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-slate-600">
                   <span className="font-medium">Distancia</span>
                   <select
                     value={isoMetersSelection}
@@ -992,6 +1191,71 @@ export function Circle() {
                     </option>
                   </select>
                 </label>
+              </div>
+            ) : (
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                <label className="flex flex-col gap-1 text-xs text-slate-600">
+                  <span className="font-medium">Velocidad (km/h)</span>
+                  {isoTrafficProfile === "con-trafico" ? (
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700">
+                      Gestionada por trafico real
+                    </div>
+                  ) : (
+                    <input
+                      type="number"
+                      min={1}
+                      step="0.1"
+                      value={isoCustomSpeedKmh}
+                      onChange={(event) => setIsoCustomSpeedKmh(Number(event.target.value))}
+                      className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    />
+                  )}
+                </label>
+                {isoTrafficProfile === "con-trafico" ? (
+                  <>
+                    <label className="flex flex-col gap-1 text-xs text-slate-600">
+                      <span className="font-medium">Tiempo de trafico (min)</span>
+                      <select
+                        value={isoTrafficMinutesSelection}
+                        onChange={(event) =>
+                          setIsoTrafficMinutesSelection(event.target.value as TrafficMinutesSelection)
+                        }
+                        className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="15">15 min</option>
+                        <option value="30">30 min</option>
+                        <option value="45">45 min</option>
+                        <option value="interval-15">Intervalos (15, 30, 45)</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs text-slate-600">
+                      <span className="font-medium">depart_at (opcional)</span>
+                      <input
+                        type="datetime-local"
+                        value={isoTrafficDepartAt}
+                        onChange={(event) => setIsoTrafficDepartAt(event.target.value)}
+                        className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
+                  </>
+                ) : (
+                  <label className="flex flex-col gap-1 text-xs text-slate-600">
+                    <span className="font-medium">Tiempo (min)</span>
+                    <select
+                      value={isoCalculatedTimeSelection}
+                      onChange={(event) =>
+                        setIsoCalculatedTimeSelection(event.target.value as IsoCalculatedTimeSelection)
+                      }
+                      className="w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                    >
+                      <option value="10">10 min</option>
+                      <option value="20">20 min</option>
+                      <option value="30">30 min</option>
+                      <option value="40">40 min</option>
+                      <option value="interval-10">Intervalos de 10m (10, 20, 30, 40)</option>
+                    </select>
+                  </label>
+                )}
               </div>
             )}
           </div>
@@ -1057,7 +1321,7 @@ export function Circle() {
                   {referenceRows.map((row) => (
                     <tr key={row.style} className="border-b border-slate-200 last:border-b-0">
                       <td className="px-2 py-2 capitalize">{row.style}</td>
-                      <td className="px-2 py-2">{isoProfile || "sin perfil"}</td>
+                      <td className="px-2 py-2">{currentIsoProfileLabel}</td>
                       <td className="px-2 py-2">
                         <div className="flex flex-wrap gap-1">
                           {row.colors.map((color) => (
@@ -1099,9 +1363,7 @@ export function Circle() {
           Modo activo: {interactionMode ?? "ninguno"}{" "}
           {interactionMode === "measure" ? "(haz clic en 2 puntos)" : null}
           {interactionMode === "iso"
-            ? isoProfile
-              ? `(profile: ${isoProfile}) configura parametros y presiona Crear`
-              : "(selecciona profile, parametros y presiona Crear)"
+            ? `(profile: ${currentIsoProfileLabel}) configura parametros y presiona Crear`
             : null}
         </div>
         {measureResult ? <div>{measureResult}</div> : null}
