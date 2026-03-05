@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-
-const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+import { getGoogleMapsScriptSrc } from "../library/googleMapsScript";
 
 type VegetationStyle = "normal" | "vegetacion" | "bosque";
 
@@ -33,11 +32,6 @@ export function VegetationMapView() {
   const [styleMode, setStyleMode] = useState<VegetationStyle>("vegetacion");
 
   useEffect(() => {
-    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === "pega_tu_api_key_aqui") {
-      setError("Falta NEXT_PUBLIC_GOOGLE_MAPS_API_KEY en .env");
-      return;
-    }
-
     const existingScript = document.querySelector(
       "script[data-google-maps='true']",
     ) as HTMLScriptElement | null;
@@ -69,7 +63,7 @@ export function VegetationMapView() {
     }
 
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&v=beta`;
+    script.src = getGoogleMapsScriptSrc();
     script.async = true;
     script.defer = true;
     script.dataset.googleMaps = "true";
@@ -125,4 +119,3 @@ export function VegetationMapView() {
     </section>
   );
 }
-

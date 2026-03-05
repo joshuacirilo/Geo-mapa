@@ -20,7 +20,6 @@ import {
   type LatLngLiteral,
 } from "../library/polygons";
 
-const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const MAP_LOAD_COST_USD = Number(process.env.NEXT_PUBLIC_MAP_LOAD_COST_USD ?? "0.007");
 const ISO_DISTANCE_CALC_PROFILE: MapboxProfile = "walking";
 const ISO_NO_TRAFFIC_PROFILE: MapboxProfile = "cycling";
@@ -545,11 +544,6 @@ export function Circle() {
   }, []);
 
   useEffect(() => {
-    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === "pega_tu_api_key_aqui") {
-      setError("Falta NEXT_PUBLIC_GOOGLE_MAPS_API_KEY en .env");
-      return;
-    }
-
     const existingScript = document.querySelector(
       "script[data-google-maps='true']",
     ) as HTMLScriptElement | null;
@@ -730,7 +724,7 @@ export function Circle() {
     }
 
     const script = document.createElement("script");
-    script.src = getGoogleMapsScriptSrc(GOOGLE_MAPS_API_KEY, ["drawing", "geometry", "places"]);
+    script.src = getGoogleMapsScriptSrc(["drawing", "geometry", "places"]);
     script.async = true;
     script.defer = true;
     script.dataset.googleMaps = "true";

@@ -1,19 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-
-const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+import { getGoogleMapsScriptSrc } from "../library/googleMapsScript";
 
 export function GoogleMap() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!GOOGLE_MAPS_API_KEY || GOOGLE_MAPS_API_KEY === "pega_tu_api_key_aqui") {
-      setError("Falta NEXT_PUBLIC_GOOGLE_MAPS_API_KEY en .env");
-      return;
-    }
-
     const existingScript = document.querySelector(
       "script[data-google-maps='true']",
     ) as HTMLScriptElement | null;
@@ -52,7 +46,7 @@ export function GoogleMap() {
     }
 
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}`;
+    script.src = getGoogleMapsScriptSrc();
     script.async = true;
     script.defer = true;
     script.dataset.googleMaps = "true";

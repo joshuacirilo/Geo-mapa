@@ -1,8 +1,7 @@
-const GOOGLE_MAPS_SCRIPT_BASE_URL = "https://maps.googleapis.com/maps/api/js";
+const GOOGLE_MAPS_SCRIPT_BASE_URL = "/api/google-maps-js";
 
-export function getGoogleMapsScriptSrc(apiKey: string, libraries: string[] = []): string {
+export function getGoogleMapsScriptSrc(libraries: string[] = []): string {
   const params = new URLSearchParams({
-    key: apiKey,
     v: "beta",
   });
 
@@ -12,4 +11,3 @@ export function getGoogleMapsScriptSrc(apiKey: string, libraries: string[] = [])
 
   return `${GOOGLE_MAPS_SCRIPT_BASE_URL}?${params.toString()}`;
 }
-
