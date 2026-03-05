@@ -39,13 +39,12 @@ const GUATEMALA_BOUNDS = {
   west: -92.23,
   east: -88.22,
 };
-const HIDE_DEFAULT_GOOGLE_POI_STYLE = [
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-];
+const HIDE_DEFAULT_GOOGLE_POI_STYLE: any[] = [];
 const NEARBY_PLACES_RADIUS_METERS = 15000;
 const NEARBY_PLACES_MAX_RESULTS = 20;
 const NEARBY_PLACE_TYPES = ["restaurant", "cafe", "hospital", "school", "bank", "pharmacy"];
+const ENABLE_LOCAL_DATASET_MARKERS = false;
+const ENABLE_CUSTOM_POI_MARKERS = false;
 
 export function Circle() {
   const mapRef = useRef<HTMLDivElement | null>(null);
@@ -359,7 +358,13 @@ export function Circle() {
   const fetchNearbyPlacesOnce = async (centerOverride?: LatLngLiteral) => {
     const googleAny = (window as any).google;
     const map = mapInstanceRef.current;
-    if (!googleAny?.maps?.importLibrary || !map || hasFetchedPlacesRef.current || isFetchingPlacesRef.current) {
+    if (
+      !ENABLE_CUSTOM_POI_MARKERS ||
+      !googleAny?.maps?.importLibrary ||
+      !map ||
+      hasFetchedPlacesRef.current ||
+      isFetchingPlacesRef.current
+    ) {
       return;
     }
 
@@ -429,13 +434,17 @@ export function Circle() {
     );
     const activePolygons = [...isoPolygons, ...shapePolygons];
     const hasAnyActiveFilter = activePolygons.length > 0;
-    if (hasAnyActiveFilter && !hasFetchedPlacesRef.current && !isFetchingPlacesRef.current) {
+    if (ENABLE_CUSTOM_POI_MARKERS && !hasFetchedPlacesRef.current && !isFetchingPlacesRef.current) {
       void fetchNearbyPlacesOnce();
     }
 
     markersRef.current.forEach((marker: any) => {
       const position = marker.getPosition();
       if (!position) return;
+      if (!ENABLE_LOCAL_DATASET_MARKERS) {
+        marker.setMap(null);
+        return;
+      }
       if (!hasAnyActiveFilter) {
         marker.setMap(null);
         return;
@@ -449,13 +458,16 @@ export function Circle() {
     placesMarkersRef.current.forEach((marker: any) => {
       const position = marker.getPosition();
       if (!position) return;
-      if (!hasAnyActiveFilter) {
+      if (!ENABLE_CUSTOM_POI_MARKERS) {
         marker.setMap(null);
+        return;
+      }
+      if (!hasAnyActiveFilter) {
+        marker.setMap(mapInstanceRef.current);
         return;
       }
 
       const isVisible = isPointInAnyPolygon(googleAny, position, activePolygons);
-
       marker.setMap(isVisible ? mapInstanceRef.current : null);
     });
     updateMapBaseVisuals();
@@ -470,7 +482,7 @@ export function Circle() {
 
     map.setOptions({
       styles,
-      clickableIcons: false,
+      clickableIcons: true,
     });
   };
 
@@ -631,15 +643,21 @@ export function Circle() {
       };
 
       const features = (mapGeoJson as any)?.features ?? [];
-      markersRef.current = features
-        .filter((feature: any) => feature?.geometry?.type === "Point")
-        .map((feature: any) => {
-          const [lng, lat] = feature.geometry.coordinates;
-          return new googleAny.maps.Marker({
-            position: { lat, lng },
-            map: null,
-          });
-        });
+      markersRef.current = ENABLE_LOCAL_DATASET_MARKERS
+        ? features
+            .filter((feature: any) => feature?.geometry?.type === "Point")
+            .map((feature: any) => {
+              const [lng, lat] = feature.geometry.coordinates;
+              return new googleAny.maps.Marker({
+                position: { lat, lng },
+                map: null,
+              });
+            })
+        : [];
+
+      if (ENABLE_CUSTOM_POI_MARKERS) {
+        void fetchNearbyPlacesOnce();
+      }
 
       const handleShapeComplete = (shape: any) => {
         shapesRef.current.push(shape);
@@ -935,6 +953,18 @@ export function Circle() {
           style={{ fontSize: 16, padding: "6px 10px" }}
         >
           ISO
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setDrawMode(null);
+            setInteractionMode(null);
+            setIsoResult("");
+          }}
+          title="Marcadores"
+          style={{ fontSize: 16, padding: "6px 10px" }}
+        >
+          Marcadores
         </button>
         <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
           Tipo:

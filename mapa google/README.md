@@ -28,6 +28,7 @@ Configurar en `.env`:
 ```env
 NEXT_PUBLIC_GOOGLE_MAPS_API_KEY="..."
 GOOGLE_MAPS_API_KEY_SERVER="..."
+GOOGLE_MAPS_ALLOWED_ORIGINS="http://localhost:3000,https://tu-dominio.com"
 NEXT_PUBLIC_MAP_LOAD_COST_USD="0.007"
 
 # Mapbox (isochrones + traffic validation)

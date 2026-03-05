@@ -4,6 +4,28 @@ const GOOGLE_MAPS_SCRIPT_BASE_URL = "https://maps.googleapis.com/maps/api/js";
 const DEFAULT_VERSION = "beta";
 
 export async function GET(request: Request) {
+  const allowedOrigins = (process.env.GOOGLE_MAPS_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (allowedOrigins.length > 0) {
+    const origin = request.headers.get("origin");
+    const referer = request.headers.get("referer");
+    let requestOrigin = origin;
+
+    if (!requestOrigin && referer) {
+      try {
+        requestOrigin = new URL(referer).origin;
+      } catch {
+        requestOrigin = null;
+      }
+    }
+
+    if (!requestOrigin || !allowedOrigins.includes(requestOrigin)) {
+      return NextResponse.json({ error: "Forbidden origin for Google Maps loader." }, { status: 403 });
+    }
+  }
+
   const serverKey =
     process.env.GOOGLE_MAPS_API_KEY_SERVER ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
